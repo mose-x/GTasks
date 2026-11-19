@@ -31,8 +31,15 @@ async function refreshState() {
     setBadge("badgeBridge", `桥接: ${state.ready ? "就绪" : "未就绪"}`, state.ready ? "ok" : "warn");
 
     const session = state.session;
+    const health = (state.watcher && state.watcher.health) || "";
+    const expired = !!(state.watcher && state.watcher.expired);
     if (session) {
-      setBadge("badgeLogin", `登录: ${session.loggedIn ? "是" : "否"}`, session.loggedIn ? "ok" : "bad");
+      const note = expired ? "会话失效" : health && health !== "ok" ? health : "";
+      setBadge(
+        "badgeLogin",
+        `登录: ${session.loggedIn ? "是" : "否"}${note ? `（${note}）` : ""}`,
+        session.loggedIn ? (expired ? "warn" : "ok") : "bad",
+      );
       setBadge("badgeToken", `at: ${session.at ? session.at.slice(0, 12) + "…" : "—"}`, session.at ? "ok" : "bad");
       setBadge("badgeBuild", `bl: ${session.bl || "—"}`, session.bl ? "ok" : "");
     } else {

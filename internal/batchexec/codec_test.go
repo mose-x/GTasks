@@ -130,3 +130,16 @@ func TestDecodeRejectsNonBatchExecuteBody(t *testing.T) {
 		}
 	}
 }
+
+func TestAuthBadClassifiesSessionLoss(t *testing.T) {
+	for _, state := range []string{"unauthorized", "redirected"} {
+		if !AuthBad(state) {
+			t.Fatalf("%q 应判定为会话失效", state)
+		}
+	}
+	for _, state := range []string{"", "ok", "anonymous", "http429", "http500"} {
+		if AuthBad(state) {
+			t.Fatalf("%q 不应判定为会话失效", state)
+		}
+	}
+}

@@ -12,6 +12,7 @@ import (
 	"log"
 	"net/http"
 	"runtime"
+	"time"
 
 	"gtasks/internal/api"
 	"gtasks/internal/batchexec"
@@ -131,11 +132,24 @@ func main() {
 	apiHandler.BindWindows(mainWindow, sessionWindow)
 
 	// Show the login window only while it is actually needed.
+	var lastRecover time.Time
 	watcher.SetChangeHandler(func(current, previous session.Status) {
 		if !watcher.AutoManage() {
 			return
 		}
 		switch {
+		case current.Expired && !previous.Expired:
+			// The cookies or the at token died mid-use while the page still
+			// looks signed in. Surface the window and reload it so Google's
+			// own login flow takes over; rate-limit the reload so a page that
+			// keeps failing cannot loop.
+			sessionWindow.Show()
+			if time.Since(lastRecover) > 3*time.Minute {
+				lastRecover = time.Now()
+				sessionWindow.Reload()
+			}
+		case previous.Expired && !current.Expired && current.LoggedIn:
+			sessionWindow.Hide()
 		case current.LoggedIn && !previous.LoggedIn:
 			sessionWindow.Hide()
 		case !current.LoggedIn && current.Ready:

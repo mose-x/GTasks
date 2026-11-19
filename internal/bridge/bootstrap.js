@@ -191,7 +191,7 @@
     var patched = function (input, init) {
       var url = typeof input === "string" ? input : (input && input.url) || "";
       var body = init && typeof init.body === "string" ? init.body : null;
-      var entry = isSniffing() ? classify(url, body) : null;
+      var entry = isSniffing() && !(init && init.__gtaskNoSniff) ? classify(url, body) : null;
       if (entry) entry.via = "fetch";
       var promise = original.apply(this, arguments);
       if (entry) {
@@ -247,6 +247,20 @@
 
   var requestCounter = Math.floor(Math.random() * 900000) + 100000;
 
+  // health() 用一个必然不存在的 rpcid 发最小请求：会话活着时 Google 回 200 +
+  // 一条错误帧；cookie 失效时回 401，或被 302 到 accounts.google.com 的登录页。
+  var HEALTH_RPC = "AAAAA";
+
+  function authState(response) {
+    if (response.status === 401 || response.status === 403) return "unauthorized";
+    if (response.redirected) return "redirected";
+    try {
+      if (response.url && location.origin && response.url.indexOf(location.origin) !== 0) return "redirected";
+    } catch (ignored) {}
+    if (!response.ok) return "http" + response.status;
+    return "ok";
+  }
+
   function runBatch(id, rpcids, freqs, opts) {
     opts = opts || {};
     if (!Array.isArray(rpcids) || rpcids.length === 0) {
@@ -298,6 +312,7 @@
       return response.text().then(function (text) {
         reply(id, response.ok, {
           status: response.status,
+          auth: authState(response),
           url: url,
           path: path,
           at: at,
@@ -340,6 +355,31 @@
     },
     sniffStatus: function (id) {
       reply(id, true, sniffStatus(), "");
+    },
+    health: function (id) {
+      var wiz = wizData();
+      var at = wiz.SNlM0e || "";
+      if (!at) {
+        reply(id, true, { state: "anonymous", status: 0, at: "" }, "");
+        return;
+      }
+      var url = "/_/TasksUi/data/batchexecute?" + [
+        "rpcids=" + HEALTH_RPC,
+        "source-path=" + encodeURIComponent(location.pathname || "/"),
+        "_reqid=" + requestCounter++,
+        "rt=c"
+      ].join("&");
+      fetch(url, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8", "X-Same-Domain": "1" },
+        body: "f.req=" + encodeURIComponent(JSON.stringify([[[HEALTH_RPC, "[]", null, "1"]]])) + "&at=" + encodeURIComponent(at) + "&",
+        __gtaskNoSniff: true
+      }).then(function (response) {
+        reply(id, true, { state: authState(response), status: response.status, at: at }, "");
+      }, function (error) {
+        reply(id, false, null, String(error));
+      });
     },
     dispatch: function (raw) {
       var message;

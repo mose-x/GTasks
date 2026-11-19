@@ -20,6 +20,11 @@ const DefaultInterval = 4 * time.Second
 // probeTimeout bounds a single probe so a stuck page cannot wedge the loop.
 const probeTimeout = 6 * time.Second
 
+// healthEvery is how many polls sit between two session health checks
+// (DefaultInterval * healthEvery ≈ half a minute). A previous bad result
+// re-checks on every poll instead.
+const healthEvery = 8
+
 // Status is one observation of the session page.
 type Status struct {
 	Ready     bool   `json:"ready"`
@@ -29,6 +34,12 @@ type Status struct {
 	At        string `json:"at,omitempty"`
 	Bl        string `json:"bl,omitempty"`
 	UserAgent string `json:"userAgent,omitempty"`
+	// Health is the last lightweight RPC probe outcome: ok / unauthorized /
+	// redirected / http<code>, empty while nothing has been checked yet.
+	Health string `json:"health,omitempty"`
+	// Expired is true when Health proves the session no longer works even
+	// though the page still looks logged in.
+	Expired   bool   `json:"expired,omitempty"`
 	CheckedAt int64  `json:"checkedAt"`
 	Error     string `json:"error,omitempty"`
 }
@@ -47,6 +58,7 @@ type Watcher struct {
 	mu         sync.RWMutex
 	status     Status
 	observed   bool
+	polls      int
 	autoManage bool
 	autoSniff  bool
 	sniffing   bool
@@ -189,6 +201,30 @@ func (w *Watcher) observe() Status {
 		current.At = session.At
 		current.Bl = session.Bl
 		current.UserAgent = session.UserAgent
+	}
+
+	// Probe only proves the page once loaded while signed in: the SPA keeps its
+	// stale WIZ_global_data after the cookies die, so a logged-in looking page
+	// can still fail every RPC. A minimal batchexecute call settles it.
+	if current.Ready && current.LoggedIn {
+		w.mu.Lock()
+		w.polls++
+		due := w.polls%healthEvery == 1 || batchexec.AuthBad(w.status.Health)
+		previousHealth := w.status.Health
+		w.mu.Unlock()
+
+		current.Health = previousHealth
+		if due {
+			healthCtx, healthCancel := context.WithTimeout(context.Background(), probeTimeout)
+			health, err := w.client.Health(healthCtx)
+			healthCancel()
+			// A failed health call is not itself proof of expiry; keep the
+			// previous verdict and try again on the next poll.
+			if err == nil {
+				current.Health = health.State
+			}
+		}
+		current.Expired = batchexec.AuthBad(current.Health)
 	}
 
 	w.mu.Lock()

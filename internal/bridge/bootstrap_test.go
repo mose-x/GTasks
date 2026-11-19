@@ -376,6 +376,120 @@ func TestBootstrapReinjectionKeepsRecorderArmed(t *testing.T) {
 	}
 }
 
+func healthScript(t *testing.T, id uint64) string {
+	t.Helper()
+	script, err := dispatchScript(id, "health", nil)
+	if err != nil {
+		t.Fatalf("dispatchScript: %v", err)
+	}
+	return script
+}
+
+func decodeHealth(t *testing.T, messages []harnessMessage, id uint64) struct {
+	State  string `json:"state"`
+	Status int    `json:"status"`
+} {
+	t.Helper()
+	var health struct {
+		State  string `json:"state"`
+		Status int    `json:"status"`
+	}
+	if err := json.Unmarshal(findResult(t, messages, id).Data, &health); err != nil {
+		t.Fatalf("解析 health 结果: %v", err)
+	}
+	return health
+}
+
+// 会话活着：200 + 一条错误帧。
+func TestBootstrapHealthReportsOK(t *testing.T) {
+	output := runHarness(t, []string{BootstrapJS, healthScript(t, 61)})
+	health := decodeHealth(t, decodeMessages(t, output), 61)
+	if health.State != "ok" || health.Status != 200 {
+		t.Fatalf("健康状态不正确: %+v", health)
+	}
+}
+
+// cookie 失效时 Google 会 302 到登录页，fetch 跟随之后 response.redirected 为真。
+func TestBootstrapHealthDetectsLoginRedirect(t *testing.T) {
+	output := runHarnessSpec(t, []string{BootstrapJS, healthScript(t, 62)}, map[string]any{
+		"fetchRedirected": true,
+		"fetchUrl":        "https://accounts.google.com/ServiceLogin",
+	})
+	health := decodeHealth(t, decodeMessages(t, output), 62)
+	if health.State != "redirected" {
+		t.Fatalf("应识别登录重定向，实到: %+v", health)
+	}
+}
+
+// at 被拒绝时 batchexecute 回 401。
+func TestBootstrapHealthDetectsUnauthorized(t *testing.T) {
+	output := runHarnessSpec(t, []string{BootstrapJS, healthScript(t, 63)}, map[string]any{
+		"fetchStatus": 401,
+	})
+	health := decodeHealth(t, decodeMessages(t, output), 63)
+	if health.State != "unauthorized" {
+		t.Fatalf("应识别 401，实到: %+v", health)
+	}
+}
+
+// 未登录时不应发请求，直接报 anonymous。
+func TestBootstrapHealthAnonymousWithoutToken(t *testing.T) {
+	output := runHarnessSpec(t, []string{BootstrapJS, healthScript(t, 64)}, map[string]any{
+		"location": map[string]string{
+			"href":     "https://accounts.google.com/signin",
+			"origin":   "https://accounts.google.com",
+			"pathname": "/signin",
+			"hostname": "accounts.google.com",
+		},
+		"wizEmpty": true,
+	})
+	messages := decodeMessages(t, output)
+	health := decodeHealth(t, messages, 64)
+	if health.State != "anonymous" {
+		t.Fatalf("无 at 时应报 anonymous，实到: %+v", health)
+	}
+	if len(output.Requests) != 0 {
+		t.Fatalf("anonymous 时不应发请求，实到 %d", len(output.Requests))
+	}
+}
+
+// 普通 batch 调用也要带上 auth 判定，调用方才能区分业务错误与会话失效。
+func TestBootstrapBatchCarriesAuthState(t *testing.T) {
+	script, err := dispatchScript(65, "batch", map[string]any{
+		"rpcids": []string{"AbCdE"},
+		"freqs":  []any{[]any{}},
+	})
+	if err != nil {
+		t.Fatalf("dispatchScript: %v", err)
+	}
+	output := runHarnessSpec(t, []string{BootstrapJS, script}, map[string]any{"fetchStatus": 403})
+	result := findResult(t, decodeMessages(t, output), 65)
+	var data struct {
+		Auth   string `json:"auth"`
+		Status int    `json:"status"`
+	}
+	if err := json.Unmarshal(result.Data, &data); err != nil {
+		t.Fatalf("解析 batch 结果: %v", err)
+	}
+	if data.Auth != "unauthorized" || data.Status != 403 {
+		t.Fatalf("auth 判定不正确: %+v", data)
+	}
+}
+
+// 健康检查自己的请求不能被抓包记录污染（rpcid=AAAAA 是假的）。
+func TestBootstrapHealthIsNotSniffed(t *testing.T) {
+	start, err := dispatchScript(66, "sniffStart", nil)
+	if err != nil {
+		t.Fatalf("dispatchScript: %v", err)
+	}
+	output := runHarness(t, []string{BootstrapJS, start, healthScript(t, 67)})
+	for _, message := range decodeMessages(t, output) {
+		if message.Kind == "sniff" {
+			t.Fatalf("健康检查不应产生抓包记录: %s", message.Entry)
+		}
+	}
+}
+
 func TestBootstrapRejectsUnknownMethod(t *testing.T) {
 	script, err := dispatchScript(33, "doesNotExist", nil)
 	if err != nil {

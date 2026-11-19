@@ -57,6 +57,14 @@ type BatchResult struct {
 	ElapsedMs int64      `json:"elapsedMs"`
 	Raw       string     `json:"raw"`
 	Responses []Response `json:"responses"`
+	// Auth 是页面对本次响应的判定：ok / unauthorized / redirected / http<码>。
+	// unauthorized 或 redirected 说明会话已失效，调用方应引导重新登录。
+	Auth string `json:"auth,omitempty"`
+}
+
+// AuthBad reports whether an auth classification means the session is unusable.
+func AuthBad(state string) bool {
+	return state == "unauthorized" || state == "redirected"
 }
 
 // Client drives batchexecute through the page bridge. Every request is issued
@@ -128,6 +136,30 @@ func (c *Client) Batch(ctx context.Context, calls []Call, options Options) (*Bat
 	}
 	result.Responses = responses
 	return &result, nil
+}
+
+// HealthState is the outcome of one lightweight session probe.
+type HealthState struct {
+	// State is ok / anonymous / unauthorized / redirected / http<码>.
+	State  string `json:"state"`
+	Status int    `json:"status"`
+	At     string `json:"at"`
+}
+
+// Health asks the page to issue a minimal batchexecute call with a rpcid that
+// cannot exist. A live session answers 200 with an error frame; a dead cookie
+// answers 401 or a redirect into the Google login flow. Unlike Probe it proves
+// the session still works, not merely that the page once loaded logged in.
+func (c *Client) Health(ctx context.Context) (*HealthState, error) {
+	raw, err := c.bridge.Call(ctx, "health", nil)
+	if err != nil {
+		return nil, err
+	}
+	var state HealthState
+	if err := json.Unmarshal(raw, &state); err != nil {
+		return nil, fmt.Errorf("batchexec: 解析会话健康状态失败: %w", err)
+	}
+	return &state, nil
 }
 
 // SniffControl toggles the in-page batchexecute recorder.

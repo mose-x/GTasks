@@ -98,6 +98,25 @@ Windows 那一行是关键坑：`navigateInitialPage` 只在 `options.HTML != ""
 （`reportsMainFrame = runtime.GOOS == "darwin"`）上过滤子框架，其余平台靠协议前缀 +
 窗口名过滤 —— 否则整条桥接会被静默丢弃。
 
+### 会话韧性：识别「看着登录、实际掉线」
+
+cookie 失效之后 SPA 仍留着旧的 `WIZ_global_data`，页面上 `SNlM0e` 还在、probe 仍报「已登录」，
+但每个 RPC 都会 401 或被 302 去登录页。所以 watcher 每 8 轮轮询（约半分钟）额外做一次
+**健康检查**（`bootstrap.js` 的 `health` 方法）：用一个必然不存在的 rpcid `AAAAA` 发最小请求 ——
+会话活着回 200 + 一条错误帧；cookie 死了回 401，或 fetch 跟随重定向落到 `accounts.google.com`
+（`response.redirected`）。该请求带 `__gtaskNoSniff` 标记，不会混进抓包记录；上一轮结果异常时
+改为每轮都复查。
+
+判定为 `unauthorized` / `redirected` 之后：
+
+- 主界面横幅提示「会话已失效，请重新登录」，附「打开登录窗口」按钮
+- 工作台 `登录` 徽标变成 `是（会话失效）`
+- `main.go` 弹出会话窗口并重载一次（限速 3 分钟一次），把后续交给 Google 自己的登录流程
+- 登录完成或会话恢复后窗口自动隐藏
+
+`__Secure-1PSIDTS` 这类 cookie 轮换由网页自己的 JS 完成（会话窗口加载的是真实
+tasks.google.com），本项目不做轮换；轮换失败最终表现为 401 / 重定向，同样被健康检查兜住。
+
 ## 操作映射：把抓包变成能力
 
 rpcid 和参数结构没有文档，只能从活的网页上抓。抓到之后要能复用，所以有一层
@@ -201,7 +220,7 @@ go test ./...
 - [x] 深色主题（侧栏三态按钮：浅色 → 深色 → 跟随系统，选择存 `localStorage`）
 - [x] Windows / Linux 桥接对齐（bootstrap 注入路径、`IsMainFrame` 过滤）+ 交叉编译验证
 - [ ] Windows / Linux 实机冒烟测试（需要真实 Windows / Linux 环境与 Google 账号）
-- [ ] 掉线检测与自动重登（`at` 过期、`__Secure-1PSIDTS` 轮换）
+- [x] 掉线检测与自动重登（健康检查识别 401 / 登录重定向 → 横幅 + 弹窗重载）
 - [ ] 本地缓存与离线视图
 
 ## 风险

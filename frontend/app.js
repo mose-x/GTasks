@@ -38,6 +38,7 @@ const VIRTUAL_COMPLETED = "@completed";
 
 const store = {
   demo: false,
+  expired: false,
   lists: [],
   tasks: [],
   activeListId: VIRTUAL_MY,
@@ -88,6 +89,28 @@ function hideBanner() {
   $("banner").hidden = true;
 }
 
+function expiredBanner() {
+  showBanner("会话已失效（cookie 或 at 被 Google 拒绝），请在 Google 会话窗口里重新登录。", [
+    { label: "打开登录窗口", onClick: () => api("/api/session", { method: "POST", body: { action: "show" } }).catch(() => {}) },
+  ]);
+}
+
+// 主界面不轮询数据，但需要知道会话是否中途失效：watcher 的健康检查发现
+// RPC 被 401 / 重定向到登录页时，这里给出横幅和重新登录入口。
+async function refreshSession() {
+  let state;
+  try {
+    state = await api("/api/state");
+  } catch {
+    return;
+  }
+  const expired = !!(state.watcher && state.watcher.expired);
+  const was = store.expired;
+  store.expired = expired;
+  if (expired && !was) expiredBanner();
+  if (!expired && was) await loadData();
+}
+
 /* ----------------------------------------------------------------- load */
 
 async function loadData() {
@@ -111,7 +134,8 @@ async function loadData() {
   }
 
   try {
-    hideBanner();
+    if (store.expired) expiredBanner();
+    else hideBanner();
     // rpcid 已知，但响应结构仍需按抓包结果实现解析。
     await execute("listTaskLists", {});
     toast("listTaskLists 已调用，响应解析尚未实现（见工作台抓包结果）");
@@ -687,6 +711,7 @@ async function init() {
   await refreshOps();
   await loadData();
   setInterval(refreshOps, 15000);
+  setInterval(refreshSession, 8000);
 }
 
 init();
