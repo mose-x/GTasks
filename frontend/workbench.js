@@ -5,6 +5,11 @@ let sniffCursor = 0;
 let operations = [];
 let selectedCapture = null;
 let timers = [];
+let historyNoted = false;
+
+// Upper bound on rendered rows. A restart reloads the whole capture log into the
+// ring, and one <li> per capture with its JSON bodies gets heavy quickly.
+const MAX_RENDERED = 400;
 
 /* ------------------------------------------------------------------ tabs */
 
@@ -113,11 +118,28 @@ async function pollSniff() {
   }
   const entries = payload.entries || [];
   if (entries.length === 0) return;
-  for (const entry of entries) {
+  // Render only the tail when a large history comes back at once. The cursor
+  // still advances past the skipped rows, so they are not fetched again.
+  let visible = entries;
+  if (entries.length > MAX_RENDERED) {
+    visible = entries.slice(-MAX_RENDERED);
+    if (!historyNoted) {
+      historyNoted = true;
+      toast(`历史抓包较多，仅显示最近 ${MAX_RENDERED} 条（完整内容用「导出」）`);
+    }
+  }
+  for (const entry of visible) {
     appendEntry(entry);
     sniffCursor = entry.seq;
   }
+  trimSniffList();
   setBadge("badgeCount", `抓包: ${payload.seq}${payload.dropped ? ` (丢弃 ${payload.dropped})` : ""}`, "ok");
+}
+
+// Newest entries are prepended, so the oldest ones sit at the bottom.
+function trimSniffList() {
+  const list = $("sniffList");
+  while (list.children.length > MAX_RENDERED) list.removeChild(list.lastElementChild);
 }
 
 function parseEntry(entry) {

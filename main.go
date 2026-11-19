@@ -43,7 +43,15 @@ func main() {
 	recorder := api.NewRecorder(captureRingLimit)
 	sessionBridge.SetSniffHandler(recorder.Add)
 	if dataDir != "" {
-		if err := recorder.SetPersistence(api.CapturesPath(dataDir)); err != nil {
+		captures := api.CapturesPath(dataDir)
+		loaded, err := recorder.LoadHistory(captures)
+		switch {
+		case err != nil:
+			log.Printf("读取历史抓包失败: %v", err)
+		case loaded > 0:
+			log.Printf("已载入 %d 条历史抓包（%s）", loaded, captures)
+		}
+		if err := recorder.SetPersistence(captures); err != nil {
 			log.Printf("抓包日志落盘失败: %v", err)
 		}
 	}

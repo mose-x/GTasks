@@ -52,3 +52,50 @@ function ensureToast() {
   node.className = "toast";
   document.body.append(node);
 }
+
+/* ----------------------------------------------------------------- theme */
+
+const THEME_KEY = "gtasks-theme";
+const THEME_MODES = ["light", "dark", "system"];
+const THEME_LABEL = { light: "浅色", dark: "深色", system: "跟随系统" };
+
+function themeMode() {
+  try {
+    const stored = localStorage.getItem(THEME_KEY);
+    return THEME_MODES.includes(stored) ? stored : "system";
+  } catch {
+    return "system";
+  }
+}
+
+function systemPrefersDark() {
+  return typeof matchMedia === "function" && matchMedia("(prefers-color-scheme: dark)").matches;
+}
+
+// Applies the mode to <html data-theme> and reports whether it resolved to dark.
+function applyTheme(mode) {
+  const dark = mode === "dark" || (mode === "system" && systemPrefersDark());
+  document.documentElement.dataset.theme = dark ? "dark" : "light";
+  return dark;
+}
+
+function setTheme(mode) {
+  try {
+    localStorage.setItem(THEME_KEY, mode);
+  } catch {}
+  return applyTheme(mode);
+}
+
+// Cycles 浅色 → 深色 → 跟随系统, mirroring the web app's theme setting.
+function cycleTheme() {
+  const mode = THEME_MODES[(THEME_MODES.indexOf(themeMode()) + 1) % THEME_MODES.length];
+  return { mode, dark: setTheme(mode) };
+}
+
+function initTheme() {
+  applyTheme(themeMode());
+  if (typeof matchMedia !== "function") return;
+  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
+    if (themeMode() === "system") applyTheme("system");
+  });
+}

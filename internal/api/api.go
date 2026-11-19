@@ -3,6 +3,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -123,6 +124,57 @@ func (r *Recorder) SetPersistence(path string) error {
 	return nil
 }
 
+// LoadHistory reads a JSON Lines capture log back into the ring so that earlier
+// discoveries survive a restart. Only the most recent limit entries are kept and
+// the rest are counted as dropped; malformed or payload-less lines are skipped.
+// Every loaded entry is renumbered into one contiguous run, because sequence
+// numbers restart from zero in each session and the workbench polls by cursor.
+// A missing file is not an error: the first run has no history yet.
+func (r *Recorder) LoadHistory(path string) (int, error) {
+	if path == "" {
+		return 0, nil
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return 0, nil
+		}
+		return 0, fmt.Errorf("api: 无法读取抓包日志 %s: %w", path, err)
+	}
+
+	loaded := make([]Entry, 0, 128)
+	for _, line := range bytes.Split(body, []byte("\n")) {
+		line = bytes.TrimSpace(line)
+		if len(line) == 0 {
+			continue
+		}
+		var entry Entry
+		if err := json.Unmarshal(line, &entry); err != nil || len(entry.Raw) == 0 {
+			continue
+		}
+		if entry.At == 0 {
+			entry.At = time.Now().UnixMilli()
+		}
+		loaded = append(loaded, entry)
+	}
+	if len(loaded) == 0 {
+		return 0, nil
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if overflow := len(loaded) - r.limit; overflow > 0 {
+		r.dropped += uint64(overflow)
+		loaded = loaded[overflow:]
+	}
+	for index := range loaded {
+		r.seq++
+		loaded[index].Seq = r.seq
+	}
+	r.entries = append(r.entries, loaded...)
+	return len(loaded), nil
+}
+
 // PersistPath reports the capture log location, or "" when disabled.
 func (r *Recorder) PersistPath() string {
 	r.mu.Lock()
@@ -138,6 +190,13 @@ func (r *Recorder) Close() {
 		_ = r.file.Close()
 		r.file = nil
 	}
+}
+
+// Seq reports the sequence number of the most recent capture.
+func (r *Recorder) Seq() uint64 {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.seq
 }
 
 // All returns every capture currently held in the ring.
@@ -559,6 +618,7 @@ func (h *Handler) handleConfig(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"dataDir":     h.dataDir,
 		"captures":    h.rec.PersistPath(),
+		"captureSeq":  h.rec.Seq(),
 		"operations":  h.registry.Path(),
 		"batchPath":   batchexec.DefaultPath,
 		"autoManage":  h.watcher != nil && h.watcher.AutoManage(),

@@ -1,8 +1,11 @@
-/* Google Tasks 网页版的浅色主题还原。
-   颜色取自 tasks.google.com：主色 #1a73e8，正文 #202124 / #3c4043，
-   次要文字 #5f6368，分隔线 #e0e0e0 / #e8eaed，选中底色 #e8f0fe。 */
+/* Google Tasks 网页版的主题还原（浅色 + 深色）。
+   浅色取自 tasks.google.com：主色 #1a73e8，正文 #202124 / #3c4043，
+   次要文字 #5f6368，分隔线 #e0e0e0 / #e8eaed，选中底色 #e8f0fe。
+   深色沿用 Google 网页版的暗色规范：底 #202124，正文 #e8eaed，
+   次要 #9aa0a6，分隔线 #3c4043，强调色 #8ab4f8。 */
 
 :root {
+  color-scheme: light;
   --blue: #1a73e8;
   --blue-hover: #1765cc;
   --selected: #e8f0fe;
@@ -14,10 +17,65 @@
   --bg: #ffffff;
   --hover: #f1f3f4;
   --danger: #d93025;
+  --danger-bg: #fce8e6;
+  --on-accent: #ffffff;
+  --logo-bg: #1a73e8;
+  --warning-bg: #fef7e0;
+  --warning-border: #fde293;
+  --warning-text: #7a5900;
+  --star: #f9ab00;
+  --star-bg: #fef7e0;
+  --empty-icon: #dadce0;
+  --switch-track: #dadce0;
+  --switch-knob: #ffffff;
+  --btn-border: #dadce0;
+  --btn-border-hover: #c6c6c6;
+  --toast-bg: #202124;
+  --toast-text: #ffffff;
+  --toast-error-bg: #b3261e;
+  --toast-error-text: #ffffff;
+  --scrollbar: #dadce0;
+  --scrollbar-hover: #bdc1c6;
+  --scrollbar-border: #ffffff;
   --font: "Google Sans", "Google Sans Text", Roboto, "Helvetica Neue", Arial,
     "PingFang SC", "Microsoft YaHei", sans-serif;
   --sidebar-width: 280px;
   --detail-width: 340px;
+}
+
+/* 深色主题：由 shared.js 的 initTheme() 按用户选择或系统偏好挂到 <html> 上。 */
+[data-theme="dark"] {
+  color-scheme: dark;
+  --blue: #8ab4f8;
+  --blue-hover: #aecbfa;
+  --selected: rgba(138, 180, 248, 0.16);
+  --text: #e8eaed;
+  --text-2: #dadce0;
+  --text-3: #9aa0a6;
+  --line: #3c4043;
+  --line-soft: #2e3034;
+  --bg: #202124;
+  --hover: rgba(232, 234, 237, 0.08);
+  --danger: #f28b82;
+  --danger-bg: rgba(242, 139, 130, 0.16);
+  --on-accent: #202124;
+  --warning-bg: #3f3a26;
+  --warning-border: #5c5232;
+  --warning-text: #fdd663;
+  --star: #fdd663;
+  --star-bg: rgba(253, 214, 99, 0.14);
+  --empty-icon: #3c4043;
+  --switch-track: #5f6368;
+  --switch-knob: #e8eaed;
+  --btn-border: #5f6368;
+  --btn-border-hover: #9aa0a6;
+  --toast-bg: #e8eaed;
+  --toast-text: #202124;
+  --toast-error-bg: #f28b82;
+  --toast-error-text: #202124;
+  --scrollbar: #5f6368;
+  --scrollbar-hover: #9aa0a6;
+  --scrollbar-border: #202124;
 }
 
 * { box-sizing: border-box; }
@@ -33,6 +91,8 @@ body {
   color: var(--text);
   background: var(--bg);
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 svg { width: 20px; height: 20px; fill: currentColor; display: block; }
@@ -40,24 +100,26 @@ svg { width: 20px; height: 20px; fill: currentColor; display: block; }
 .app {
   display: grid;
   grid-template-columns: var(--sidebar-width) minmax(0, 1fr) auto;
-  height: 100vh;
+  flex: 1;
+  min-height: 0;
 }
 
 /* ------------------------------------------------------------- 顶部横幅 */
 
+/* 提示横幅占据文档流而不是浮在最上层：浮动会盖住侧栏顶部的按钮，
+   而 display:flex 又会让 [hidden] 失效（作者样式覆盖 UA 样式）。 */
 .banner {
-  position: fixed;
-  top: 0; left: 0; right: 0;
-  z-index: 20;
+  flex: none;
   padding: 8px 16px;
-  background: #fef7e0;
-  border-bottom: 1px solid #fde293;
-  color: #7a5900;
+  background: var(--warning-bg);
+  border-bottom: 1px solid var(--warning-border);
+  color: var(--warning-text);
   font-size: 13px;
   display: flex;
   gap: 10px;
   align-items: center;
 }
+.banner[hidden] { display: none; }
 .banner button {
   font: inherit;
   color: var(--blue);
@@ -95,7 +157,7 @@ svg { width: 20px; height: 20px; fill: currentColor; display: block; }
 .logo {
   width: 26px; height: 26px;
   border-radius: 7px;
-  background: var(--blue);
+  background: var(--logo-bg);
   display: grid;
   place-items: center;
   flex: none;
@@ -145,8 +207,8 @@ svg { width: 20px; height: 20px; fill: currentColor; display: block; }
   font: inherit;
 }
 .icon-btn:hover { background: var(--hover); color: var(--text-2); }
-.icon-btn.danger:hover { background: #fce8e6; color: var(--danger); }
-.icon-btn.wide { width: auto; padding: 0 10px; border-radius: 6px; font-size: 12px; }
+.icon-btn.danger:hover { background: var(--danger-bg); color: var(--danger); }
+.icon-btn.wide { width: auto; padding: 0 10px; border-radius: 6px; font-size: 12px; white-space: nowrap; }
 .icon-btn.on { color: var(--blue); }
 
 /* --------------------------------------------------------------- 主区域 */
@@ -209,7 +271,7 @@ svg { width: 20px; height: 20px; fill: currentColor; display: block; }
 }
 .checkbox:hover { border-color: var(--blue); }
 .checkbox svg { width: 14px; height: 14px; }
-.task.done .checkbox { border-color: var(--blue); background: var(--blue); color: #fff; }
+.task.done .checkbox { border-color: var(--blue); background: var(--blue); color: var(--on-accent); }
 
 .task-main { flex: 1; min-width: 0; }
 .task-title {
@@ -237,13 +299,13 @@ svg { width: 20px; height: 20px; fill: currentColor; display: block; }
   padding: 2px 8px;
 }
 .chip svg { width: 14px; height: 14px; }
-.chip.overdue { color: var(--danger); background: #fce8e6; }
-.chip.starred { color: #f9ab00; background: #fef7e0; }
+.chip.overdue { color: var(--danger); background: var(--danger-bg); }
+.chip.starred { color: var(--star); background: var(--star-bg); }
 
 .task-actions { display: flex; gap: 2px; opacity: 0; transition: opacity .12s; }
 .task:hover .task-actions, .task.selected .task-actions { opacity: 1; }
 .star-btn { color: var(--text-3); }
-.star-btn.on { color: #f9ab00; opacity: 1; }
+.star-btn.on { color: var(--star); opacity: 1; }
 .task .star-btn.on { opacity: 1; }
 .task-actions .icon-btn.always { opacity: 1; }
 
@@ -253,7 +315,7 @@ svg { width: 20px; height: 20px; fill: currentColor; display: block; }
   padding: 60px 20px;
   font-size: 14px;
 }
-.empty svg { width: 64px; height: 64px; margin: 0 auto 14px; fill: #dadce0; }
+.empty svg { width: 64px; height: 64px; margin: 0 auto 14px; fill: var(--empty-icon); }
 
 /* ------------------------------------------------------------- 输入区域 */
 
@@ -269,7 +331,7 @@ svg { width: 20px; height: 20px; fill: currentColor; display: block; }
   border-radius: 50%;
   border: none;
   background: var(--blue);
-  color: #fff;
+  color: var(--on-accent);
   display: grid;
   place-items: center;
   cursor: pointer;
@@ -297,6 +359,8 @@ svg { width: 20px; height: 20px; fill: currentColor; display: block; }
   min-height: 0;
   background: var(--bg);
 }
+/* display:flex 会盖掉 [hidden] 的 UA 规则，未选中任务时必须显式收起。 */
+.detail[hidden] { display: none; }
 .detail-head {
   display: flex;
   align-items: center;
@@ -337,6 +401,12 @@ svg { width: 20px; height: 20px; fill: currentColor; display: block; }
   padding: 6px 8px;
   background: var(--bg);
 }
+/* 日期 + 时间 + 保存 在 340px 面板里放不下就换行，输入框允许收缩。 */
+.due-wrap { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.due-wrap input { width: auto; flex: 1 1 0; }
+.due-wrap input[type="date"] { min-width: 130px; }
+.due-wrap input[type="time"] { min-width: 92px; }
+
 .detail-field textarea { resize: vertical; min-height: 60px; }
 .detail-field input:focus, .detail-field textarea:focus, .detail-field select:focus {
   outline: none; border-color: var(--blue);
@@ -346,7 +416,7 @@ svg { width: 20px; height: 20px; fill: currentColor; display: block; }
   width: 36px; height: 20px;
   border-radius: 10px;
   border: none;
-  background: #dadce0;
+  background: var(--switch-track);
   position: relative;
   cursor: pointer;
   flex: none;
@@ -358,7 +428,7 @@ svg { width: 20px; height: 20px; fill: currentColor; display: block; }
   top: 2px; left: 2px;
   width: 16px; height: 16px;
   border-radius: 50%;
-  background: #fff;
+  background: var(--switch-knob);
   transition: transform .15s;
   box-shadow: 0 1px 2px rgba(0,0,0,.3);
 }
@@ -369,13 +439,13 @@ svg { width: 20px; height: 20px; fill: currentColor; display: block; }
   font: inherit;
   color: var(--blue);
   background: transparent;
-  border: 1px solid #dadce0;
+  border: 1px solid var(--btn-border);
   border-radius: 6px;
   padding: 6px 14px;
   cursor: pointer;
 }
-.btn:hover { background: var(--hover); border-color: #c6c6c6; }
-.btn.primary { background: var(--blue); border-color: var(--blue); color: #fff; }
+.btn:hover { background: var(--hover); border-color: var(--btn-border-hover); }
+.btn.primary { background: var(--blue); border-color: var(--blue); color: var(--on-accent); }
 .btn.primary:hover { background: var(--blue-hover); }
 
 /* --------------------------------------------------------------- toast */
@@ -385,8 +455,8 @@ svg { width: 20px; height: 20px; fill: currentColor; display: block; }
   left: 50%;
   bottom: 24px;
   transform: translateX(-50%) translateY(20px);
-  background: #202124;
-  color: #fff;
+  background: var(--toast-bg);
+  color: var(--toast-text);
   padding: 10px 18px;
   border-radius: 8px;
   opacity: 0;
@@ -398,9 +468,9 @@ svg { width: 20px; height: 20px; fill: currentColor; display: block; }
   box-shadow: 0 4px 12px rgba(0,0,0,.28);
 }
 .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
-.toast.error { background: #b3261e; }
+.toast.error { background: var(--toast-error-bg); color: var(--toast-error-text); }
 
 ::-webkit-scrollbar { width: 10px; height: 10px; }
-::-webkit-scrollbar-thumb { background: #dadce0; border-radius: 5px; border: 2px solid #fff; }
-::-webkit-scrollbar-thumb:hover { background: #bdc1c6; }
+::-webkit-scrollbar-thumb { background: var(--scrollbar); border-radius: 5px; border: 2px solid var(--scrollbar-border); }
+::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-hover); }
 ::-webkit-scrollbar-track { background: transparent; }
