@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>GTasks · 逆向工作台</title>
+  <script type="module" src="/wails/runtime.js"></script>
+  <link rel="stylesheet" href="/workbench.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="dot" id="readyDot"></span>
+      <h1>GTasks 工作台</h1>
+    </div>
+    <div class="badges">
+      <span class="badge" id="badgeBridge">桥接: 未知</span>
+      <span class="badge" id="badgeLogin">登录: 未知</span>
+      <span class="badge" id="badgeToken">at: —</span>
+      <span class="badge" id="badgeBuild">bl: —</span>
+      <span class="badge" id="badgeCount">抓包: 0</span>
+      <span class="badge" id="badgeOps">操作: 0/0</span>
+    </div>
+    <div class="actions">
+      <label class="check"><input type="checkbox" id="chkAutoManage" checked /> 自动隐藏会话</label>
+      <label class="check"><input type="checkbox" id="chkAutoSniff" checked /> 自动抓包</label>
+      <button id="btnProbe">刷新状态</button>
+      <button id="btnShowSession">显示会话窗口</button>
+      <button id="btnHideSession">隐藏会话窗口</button>
+      <button id="btnReloadSession">重载会话</button>
+    </div>
+  </header>
+
+  <nav class="tabs">
+    <button class="tab active" data-tab="sniff">RPC 抓包</button>
+    <button class="tab" data-tab="ops">操作映射</button>
+    <button class="tab" data-tab="manual">手动调用</button>
+    <button class="tab" data-tab="session">会话信息</button>
+  </nav>
+
+  <main class="content">
+    <!-- ------------------------------------------------------------ 抓包 -->
+    <section class="tabpane active" id="pane-sniff">
+      <div class="panel">
+        <div class="panel-head">
+          <h2>抓到的 batchexecute 调用</h2>
+          <div class="panel-actions">
+            <button id="btnSniffStart" class="primary">开始</button>
+            <button id="btnSniffStop">停止</button>
+            <button id="btnSniffClear">清空</button>
+            <button id="btnSniffExport">导出 JSONL</button>
+          </div>
+        </div>
+        <p class="hint">
+          在会话窗口里操作 tasks.google.com（新增任务、加星、改日期含时分、设重复、拖拽排序……），
+          这里会实时记录每次调用的 rpcid、<code>f.req</code> 与响应。点一条记录展开详情，
+          再用 <strong>生成代码</strong> 把它固化到「操作映射」里。
+        </p>
+        <ul id="sniffList" class="sniff-list"></ul>
+      </div>
+
+      <div class="panel" id="codegenPanel" hidden>
+        <div class="panel-head">
+          <h2>已选抓包 · 代码生成</h2>
+          <div class="panel-actions"><button id="btnCodegenClose">关闭</button></div>
+        </div>
+        <div id="codegenMeta" class="hint"></div>
+        <label class="field">
+          <span>固化为操作</span>
+          <div class="row">
+            <select id="selectOp" class="grow"></select>
+            <button id="btnSaveOp" class="primary">保存为操作</button>
+          </div>
+        </label>
+        <label class="field">
+          <span>steps（可直接编辑，支持 {{json .Param}} 模板占位符）</span>
+          <textarea id="codegenSteps" rows="8" spellcheck="false"></textarea>
+        </label>
+        <label class="field">
+          <span>Go 片段</span>
+          <pre id="codegenGo" class="code"></pre>
+        </label>
+        <div id="codegenWarnings" class="warnings"></div>
+      </div>
+    </section>
+
+    <!-- -------------------------------------------------------- 操作映射 -->
+    <section class="tabpane" id="pane-ops">
+      <div class="panel">
+        <div class="panel-head">
+          <h2>操作 → rpcid 映射表</h2>
+          <div class="panel-actions"><button id="btnOpsReload">重新载入</button></div>
+        </div>
+        <p class="hint">
+          官方 Tasks API 缺失的能力（星标 / 时分 / 重复）都在下面。每发现一个就把对应抓包保存进来，
+          主界面的功能就会逐个亮起来。映射表落盘在 <code id="opsPath">…</code>。
+        </p>
+        <ul id="opsList" class="ops-list"></ul>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head"><h2>执行操作</h2></div>
+        <div class="row">
+          <label class="field grow">
+            <span>操作</span>
+            <select id="execOp"></select>
+          </label>
+          <label class="field grow">
+            <span>参数（JSON 对象）</span>
+            <input id="execParams" type="text" value="{}" />
+          </label>
+          <div class="field">
+            <span>&nbsp;</span>
+            <button id="btnExec" class="primary">执行</button>
+          </div>
+        </div>
+        <label class="field">
+          <span>结果</span>
+          <textarea id="execOutput" rows="12" spellcheck="false"></textarea>
+        </label>
+      </div>
+    </section>
+
+    <!-- -------------------------------------------------------- 手动调用 -->
+    <section class="tabpane" id="pane-manual">
+      <div class="panel">
+        <div class="panel-head"><h2>手动调用 batchexecute</h2></div>
+        <label class="field">
+          <span>rpcids（逗号分隔）</span>
+          <input id="inputRpcids" type="text" placeholder="例如 oPEP7c,XyVt8b" />
+        </label>
+        <label class="field">
+          <span>参数（每行一个 JSON 数组，与 rpcids 顺序对应）</span>
+          <textarea id="inputArgs" rows="6" spellcheck="false" placeholder='[]&#10;["arg1",["nested"],null]'></textarea>
+        </label>
+        <div class="row">
+          <label class="field grow">
+            <span>endpoint path</span>
+            <input id="inputPath" type="text" value="/_/TasksUi/data/batchexecute" />
+          </label>
+          <label class="field">
+            <span>rt</span>
+            <input id="inputRT" type="text" value="c" />
+          </label>
+        </div>
+        <div class="row">
+          <label class="field grow">
+            <span>覆盖 at（留空则用页面里的 SNlM0e）</span>
+            <input id="inputAt" type="text" placeholder="自动" spellcheck="false" />
+          </label>
+          <label class="field grow">
+            <span>覆盖 bl</span>
+            <input id="inputBl" type="text" placeholder="自动" spellcheck="false" />
+          </label>
+        </div>
+        <div class="panel-actions">
+          <button id="btnCall" class="primary">发送</button>
+          <button id="btnDecode">解码下方原始响应</button>
+        </div>
+        <label class="field">
+          <span>原始响应 / 结果</span>
+          <textarea id="outputRaw" rows="16" spellcheck="false"></textarea>
+        </label>
+      </div>
+    </section>
+
+    <!-- -------------------------------------------------------- 会话信息 -->
+    <section class="tabpane" id="pane-session">
+      <div class="panel">
+        <div class="panel-head">
+          <h2>会话页面信息</h2>
+          <div class="panel-actions">
+            <button id="btnCopySession">复制 JSON</button>
+            <button id="btnCopyConfig">复制路径配置</button>
+          </div>
+        </div>
+        <pre id="sessionDump" class="dump">尚未获取</pre>
+        <h2 class="subhead">运行时路径</h2>
+        <pre id="configDump" class="dump">尚未获取</pre>
+      </div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast"></div>
+  <script src="/shared.js"></script>
+  <script src="/workbench.js"></script>
+</body>
+</html>

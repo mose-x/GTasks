@@ -1,0 +1,24 @@
+# 构建产物
+/gtasks
+/gtasks.exe
+/gtasks-arm64.exe
+*.exe
+*.dll
+*.so
+*.dylib
+/build/bin/
+/dist/
+
+# Wails / 前端工具链
+node_modules/
+frontend/dist/
+
+# 本地抓包与操作表（用户数据，见 api.DataDir）
+captures.jsonl
+operations.json.local
+
+# 编辑器与系统
+.DS_Store
+.idea/
+.vscode/
+*.swp

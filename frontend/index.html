@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Google Tasks</title>
+  <script type="module" src="/wails/runtime.js"></script>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div id="banner" class="banner" hidden></div>
+
+  <div class="app">
+    <!-- ------------------------------------------------------------ 侧栏 -->
+    <aside class="sidebar">
+      <div class="sidebar-head">
+        <span class="logo" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="20" height="20"><path fill="#fff" d="M20.35 12.58l-1.41-1.41-4.24 4.24-2.12-2.12-1.41 1.41 3.53 3.54z"/><path fill="#fff" d="M3.65 11.42l1.41 1.41 4.24-4.24 2.12 2.12 1.41-1.41-3.53-3.54z" opacity=".0"/><rect x="3" y="3" width="0" height="0"/></svg>
+        </span>
+        <h1>任务</h1>
+        <div class="sidebar-tools">
+          <button class="icon-btn" id="btnDemo" title="切换演示数据">演示</button>
+          <button class="icon-btn" id="btnNewList" title="创建新清单">
+            <svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
+          </button>
+        </div>
+      </div>
+      <nav id="listNav" class="list-nav"></nav>
+      <div class="sidebar-foot">
+        <button class="nav-item" id="navCompleted">
+          <span class="nav-icon">
+            <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
+          </span>
+          <span class="nav-label">已完成的任务</span>
+        </button>
+      </div>
+    </aside>
+
+    <!-- ---------------------------------------------------------- 任务列表 -->
+    <section class="main">
+      <header class="main-head">
+        <h2 id="listTitle">我的任务</h2>
+        <button class="icon-btn" id="btnListMenu" title="清单操作">
+          <svg viewBox="0 0 24 24"><path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/></svg>
+        </button>
+      </header>
+
+      <div id="taskList" class="task-list"></div>
+
+      <div class="composer">
+        <button class="add-circle" id="btnAddTask" title="添加任务">
+          <svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
+        </button>
+        <input id="inputNewTask" type="text" placeholder="添加任务" autocomplete="off" />
+        <button class="icon-btn" id="btnNewTaskDate" title="添加日期/时间">
+          <svg viewBox="0 0 24 24"><path d="M19 3h-1V1h-2v2H8V1H6v2H5c-1.11 0-1.99.9-1.99 2L3 19c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H5V8h14v11zM7 10h5v5H7z"/></svg>
+        </button>
+      </div>
+    </section>
+
+    <!-- ---------------------------------------------------------- 详情面板 -->
+    <aside class="detail" id="detailPanel" hidden>
+      <header class="detail-head">
+        <h3>任务详情</h3>
+        <button class="icon-btn" id="btnCloseDetail" title="关闭">
+          <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </header>
+      <div class="detail-body" id="detailBody"></div>
+      <footer class="detail-foot">
+        <button class="icon-btn danger" id="btnDeleteTask" title="删除任务">
+          <svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
+        </button>
+      </footer>
+    </aside>
+  </div>
+
+  <div id="toast" class="toast"></div>
+  <script src="/shared.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>
