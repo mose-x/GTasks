@@ -18,12 +18,24 @@ const messages = [];
 const requests = [];
 const listeners = {};
 
+// The bridge persists the recorder switch in localStorage so a reload can
+// re-arm it before the page issues its own requests.
+function makeStorage(initial) {
+  const values = new Map(Object.entries(initial || {}));
+  return {
+    getItem: (key) => (values.has(key) ? values.get(key) : null),
+    setItem: (key, value) => values.set(key, String(value)),
+    removeItem: (key) => values.delete(key),
+    _values: values,
+  };
+}
+
 function makeResponse(body, status) {
   const response = {
     ok: status >= 200 && status < 300,
     status,
     redirected: !!spec.fetchRedirected,
-    url: spec.fetchUrl ?? "https://tasks.google.com/_/TasksUi/data/batchexecute",
+    url: spec.fetchUrl ?? "https://tasks.google.com/_/TasksWebEmbedUi/data/batchexecute",
     text: async () => body,
   };
   response.clone = () => makeResponse(body, status);
@@ -55,8 +67,10 @@ const sandbox = {
     : {
         SNlM0e: "AT-token-123",
         cfb2h: "boq.tasks.ui.20261118.00",
+        Im6cmf: spec.mount ?? "/_/TasksWebEmbedUi",
         oxN3nb: [1, 2, 3],
       },
+  localStorage: makeStorage(spec.storage),
   fetch: async (url, init) => {
     requests.push({ url: String(url), init: init || null });
     return makeResponse(spec.fetchBody ?? "", spec.fetchStatus ?? 200);
@@ -98,4 +112,6 @@ for (const script of spec.scripts || []) {
 for (const fn of listeners.load || []) fn();
 await new Promise((resolve) => setTimeout(resolve, 5));
 
-process.stdout.write(JSON.stringify({ messages, requests }, null, 2));
+process.stdout.write(
+  JSON.stringify({ messages, requests, storage: Object.fromEntries(sandbox.localStorage._values) }, null, 2),
+);

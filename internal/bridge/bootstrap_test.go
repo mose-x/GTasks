@@ -25,8 +25,9 @@ type harnessRequest struct {
 }
 
 type harnessOutput struct {
-	Messages []string         `json:"messages"`
-	Requests []harnessRequest `json:"requests"`
+	Messages []string          `json:"messages"`
+	Requests []harnessRequest  `json:"requests"`
+	Storage  map[string]string `json:"storage"`
 }
 
 type harnessMessage struct {
@@ -487,6 +488,131 @@ func TestBootstrapHealthIsNotSniffed(t *testing.T) {
 		if message.Kind == "sniff" {
 			t.Fatalf("健康检查不应产生抓包记录: %s", message.Entry)
 		}
+	}
+}
+
+// batchexecute 的挂载点由页面自己公布（WIZ_global_data.Im6cmf）。写死路径曾经
+// 让所有请求 404，因为 Tasks 早已从 /_/TasksUi 迁走。
+func TestBootstrapBatchPathFollowsMountPoint(t *testing.T) {
+	script, err := dispatchScript(71, "batch", map[string]any{
+		"rpcids": []string{"AbCdE"},
+		"freqs":  []any{[]any{}},
+	})
+	if err != nil {
+		t.Fatalf("dispatchScript: %v", err)
+	}
+
+	output := runHarness(t, []string{BootstrapJS, script})
+	if len(output.Requests) != 1 {
+		t.Fatalf("应发出 1 个请求，实到 %d", len(output.Requests))
+	}
+	if got := output.Requests[0].URL; !strings.HasPrefix(got, "/_/TasksWebEmbedUi/data/batchexecute?") {
+		t.Fatalf("默认 endpoint 应取自 Im6cmf，实到: %s", got)
+	}
+
+	renamed := runHarnessSpec(t, []string{BootstrapJS, script}, map[string]any{"mount": "/_/RenamedUi/"})
+	if got := renamed.Requests[0].URL; !strings.HasPrefix(got, "/_/RenamedUi/data/batchexecute?") {
+		t.Fatalf("endpoint 应跟随页面公布的挂载点，实到: %s", got)
+	}
+}
+
+// 健康检查也必须走同一个 endpoint，否则永远报 http404。
+func TestBootstrapHealthUsesMountPoint(t *testing.T) {
+	output := runHarness(t, []string{BootstrapJS, healthScript(t, 72)})
+	health := decodeHealth(t, decodeMessages(t, output), 72)
+	if health.State != "ok" || health.Status != 200 {
+		t.Fatalf("健康状态不正确: %+v", health)
+	}
+	if len(output.Requests) != 1 {
+		t.Fatalf("应发出 1 个请求，实到 %d", len(output.Requests))
+	}
+	if got := output.Requests[0].URL; !strings.HasPrefix(got, "/_/TasksWebEmbedUi/data/batchexecute?") {
+		t.Fatalf("健康检查 endpoint 不正确: %s", got)
+	}
+}
+
+// 刷新后 bootstrap 重新注入，必须抢在页面自己的请求之前恢复抓包，否则初始化
+// RPC（也就是最需要的 rpcid）全都抓不到。
+func TestBootstrapRecorderSelfArmsAfterReload(t *testing.T) {
+	script, err := dispatchScript(73, "batch", map[string]any{
+		"rpcids": []string{"AbCdE"},
+		"freqs":  []any{[]any{}},
+	})
+	if err != nil {
+		t.Fatalf("dispatchScript: %v", err)
+	}
+
+	off := runHarnessSpec(t, []string{BootstrapJS, script}, nil)
+	if len(off.Storage) != 0 {
+		t.Fatalf("默认不应开启抓包: %v", off.Storage)
+	}
+	for _, message := range decodeMessages(t, off) {
+		if message.Kind == "sniff" {
+			t.Fatalf("默认不应产生抓包记录: %s", message.Entry)
+		}
+	}
+
+	on := runHarnessSpec(t, []string{BootstrapJS, script}, map[string]any{"storage": map[string]string{"gtasks.sniff": "1"}})
+	sniffed := 0
+	for _, message := range decodeMessages(t, on) {
+		if message.Kind == "sniff" {
+			sniffed++
+		}
+	}
+	if sniffed == 0 {
+		t.Fatal("localStorage 里开着抓包时应自动恢复记录")
+	}
+}
+
+// sniffStart/sniffStop 要写回 localStorage，刷新后才能延续。
+func TestBootstrapSniffTogglePersists(t *testing.T) {
+	start, err := dispatchScript(74, "sniffStart", nil)
+	if err != nil {
+		t.Fatalf("dispatchScript: %v", err)
+	}
+	stop, err := dispatchScript(75, "sniffStop", nil)
+	if err != nil {
+		t.Fatalf("dispatchScript: %v", err)
+	}
+
+	on := runHarness(t, []string{BootstrapJS, start})
+	if on.Storage["gtasks.sniff"] != "1" {
+		t.Fatalf("sniffStart 应持久化开关，实到: %v", on.Storage)
+	}
+	off := runHarness(t, []string{BootstrapJS, start, stop})
+	if _, exists := off.Storage["gtasks.sniff"]; exists {
+		t.Fatalf("sniffStop 应清除开关，实到: %v", off.Storage)
+	}
+}
+
+// HTTP 4xx/5xx 也要把载荷交回 Go：只回一句 "HTTP 404" 会让调用方无法区分
+// endpoint 写错、会话失效还是被限流。
+func TestBootstrapBatchKeepsPayloadOnHTTPError(t *testing.T) {
+	script, err := dispatchScript(76, "batch", map[string]any{
+		"rpcids": []string{"AbCdE"},
+		"freqs":  []any{[]any{}},
+	})
+	if err != nil {
+		t.Fatalf("dispatchScript: %v", err)
+	}
+	output := runHarnessSpec(t, []string{BootstrapJS, script}, map[string]any{
+		"fetchStatus": 404,
+		"fetchBody":   "<html>404</html>",
+	})
+	result := findResult(t, decodeMessages(t, output), 76)
+	if !result.OK {
+		t.Fatalf("拿到 HTTP 响应就算成功，错误交给调用方判定: %s", result.Error)
+	}
+	var data struct {
+		Status int    `json:"status"`
+		Auth   string `json:"auth"`
+		Path   string `json:"path"`
+	}
+	if err := json.Unmarshal(result.Data, &data); err != nil {
+		t.Fatalf("解析 batch 结果: %v", err)
+	}
+	if data.Status != 404 || data.Auth != "http404" || data.Path == "" {
+		t.Fatalf("应保留状态码与路径: %+v", data)
 	}
 }
 

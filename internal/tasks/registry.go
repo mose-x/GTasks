@@ -113,7 +113,40 @@ func LoadFrom(path string) (*Registry, error) {
 		return nil, fmt.Errorf("tasks: 打开操作表失败: %w", err)
 	}
 	defer file.Close()
-	return Load(file, path)
+	registry, err := Load(file, path)
+	if err != nil {
+		return nil, err
+	}
+	registry.absorbSeed()
+	return registry, nil
+}
+
+// absorbSeed copies in catalogue entries that a persisted file predates, so an
+// rpcid discovered in a later build still reaches users who already have an
+// operations.json on disk. Entries the user has filled in are left alone, and
+// the bundled catalogue order wins so the workbench lists operations in a
+// stable sequence.
+func (r *Registry) absorbSeed() {
+	seed, err := Load(bytes.NewReader(seedOperations), "")
+	if err != nil {
+		return
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	merged := make([]Operation, 0, len(seed.order)+len(r.order))
+	for _, op := range seed.order {
+		if _, exists := r.defs[op]; !exists {
+			r.defs[op] = seed.defs[op]
+		}
+		merged = append(merged, op)
+	}
+	for _, op := range r.order {
+		if _, inSeed := seed.defs[op]; !inSeed {
+			merged = append(merged, op)
+		}
+	}
+	r.order = merged
 }
 
 // Seeded returns a registry seeded from the bundled catalogue and bound to path,

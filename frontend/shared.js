@@ -13,10 +13,13 @@ function toast(message, isError = false) {
   toast.timer = setTimeout(() => node.classList.remove("show"), isError ? 4500 : 2200);
 }
 
+// 控制端口要求带自定义头（跨站防护）；内置资源服务器不校验，多带一个头无害。
+const API_HEADERS = { "X-GTasks-Client": "1" };
+
 async function api(path, { method = "GET", body } = {}) {
   const response = await fetch(path, {
     method,
-    headers: body === undefined ? undefined : { "Content-Type": "application/json" },
+    headers: body === undefined ? API_HEADERS : { ...API_HEADERS, "Content-Type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   const payload = await response.json().catch(() => ({}));

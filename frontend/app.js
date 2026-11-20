@@ -10,11 +10,17 @@ const ICON = {
   starOn: '<svg viewBox="0 0 24 24"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg>',
   check: '<svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>',
   list: '<svg viewBox="0 0 24 24"><path d="M4 6h16v2H4zm0 5h16v2H4zm0 5h16v2H4z"/></svg>',
-  myTasks: '<svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>',
   calendar: '<svg viewBox="0 0 24 24"><path d="M19 3h-1V1h-2v2H8V1H6v2H5c-1.11 0-1.99.9-1.99 2L3 19c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H5V8h14v11zM7 10h5v5H7z"/></svg>',
   repeat: '<svg viewBox="0 0 24 24"><path d="M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4z"/></svg>',
   subtask: '<svg viewBox="0 0 24 24"><path d="M4 6h16v2H4zm2 5h14v2H6zm3 5h11v2H9z"/></svg>',
   chevron: '<svg viewBox="0 0 24 24"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg>',
+  allTasks: '<svg viewBox="0 0 24 24"><path d="M22 5.18L10.59 16.6l-4.24-4.24 1.41-1.41 2.83 2.83 10-10L22 5.18zM19.79 10.22C19.92 10.79 20 11.39 20 12c0 4.42-3.58 8-8 8s-8-3.58-8-8 3.58-8 8-8c1.58 0 3.04.46 4.28 1.25l1.44-1.44C16.1 2.67 14.13 2 12 2 6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10c0-1.19-.22-2.33-.6-3.39l-1.61 1.61z"/></svg>',
+  more: '<svg viewBox="0 0 24 24"><path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/></svg>',
+  trash: '<svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>',
+  add: '<svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>',
+  expandLess: '<svg viewBox="0 0 24 24"><path d="M12 8l-6 6 1.41 1.41L12 10.83l4.59 4.58L12 12z"/></svg>',
+  expandMore: '<svg viewBox="0 0 24 24"><path d="M16.59 8.59L12 13.17 7.41 8.59 6 10l6 6 6-6z"/></svg>',
+  refresh: '<svg viewBox="0 0 24 24"><path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-8 8s3.57 8 8 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>',
   empty: '<svg viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H5V5h14v14zM7 10h2v7H7zm4-3h2v10h-2zm4 6h2v4h-2z"/></svg>',
   themeLight: '<svg viewBox="0 0 24 24"><path d="M12 7c-2.76 0-5 2.24-5 5s2.24 5 5 5 5-2.24 5-5-2.24-5-5-5zM2 13h2c.55 0 1-.45 1-1s-.45-1-1-1H2c-.55 0-1 .45-1 1s.45 1 1 1zm18 0h2c.55 0 1-.45 1-1s-.45-1-1-1h-2c-.55 0-1 .45-1 1s.45 1 1 1zM11 2v2c0 .55.45 1 1 1s1-.45 1-1V2c0-.55-.45-1-1-1s-1 .45-1 1zm0 18v2c0 .55.45 1 1 1s1-.45 1-1v-2c0-.55-.45-1-1-1s-1 .45-1 1zM5.99 4.58c-.39-.39-1.03-.39-1.41 0-.39.39-.39 1.03 0 1.41l1.06 1.06c.39.39 1.03.39 1.41 0s.39-1.03 0-1.41L5.99 4.58zm12.37 12.37c-.39-.39-1.03-.39-1.41 0-.39.39-.39 1.03 0 1.41l1.06 1.06c.39.39 1.03.39 1.41 0 .39-.39.39-1.03 0-1.41l-1.06-1.06zm1.06-10.96c.39-.39.39-1.03 0-1.41-.39-.39-1.03-.39-1.41 0l-1.06 1.06c-.39.39-.39 1.03 0 1.41s1.03.39 1.41 0l1.06-1.06zM7.05 18.36c.39-.39.39-1.03 0-1.41-.39-.39-1.03-.39-1.41 0l-1.06 1.06c-.39.39-.39 1.03 0 1.41s1.03.39 1.41 0l1.06-1.06z"/></svg>',
   themeDark: '<svg viewBox="0 0 24 24"><path d="M12 3c-4.97 0-9 4.03-9 9s4.03 9 9 9 9-4.03 9-9c0-.46-.04-.92-.1-1.36-.98 1.37-2.58 2.26-4.4 2.26-2.98 0-5.4-2.42-5.4-5.4 0-1.81.89-3.42 2.26-4.4-.44-.06-.9-.1-1.36-.1z"/></svg>',
@@ -33,16 +39,19 @@ function renderThemeButton() {
 }
 
 const VIRTUAL_STARRED = "@starred";
-const VIRTUAL_MY = "@my";
-const VIRTUAL_COMPLETED = "@completed";
+const VIRTUAL_ALL = "@all";
 
 const store = {
   demo: false,
   expired: false,
   lists: [],
   tasks: [],
-  activeListId: VIRTUAL_MY,
+  account: { id: "", email: "" },
+  activeListId: VIRTUAL_ALL,
   activeTaskId: null,
+  // 侧栏「任务列表」分组是否收起，以及哪些清单的已完成段是展开的。
+  listsCollapsed: false,
+  expandedCompleted: new Set(),
   ops: new Map(),
 };
 
@@ -113,6 +122,8 @@ async function refreshSession() {
 
 /* ----------------------------------------------------------------- load */
 
+// 网页端切换清单、已加星标、展开已完成时都不再发请求：全部视图都由一次
+// snapshot 返回的数据在本地渲染。这里也一样，一次 /api/tasks 就够整份界面。
 async function loadData() {
   if (store.demo) {
     seedDemo();
@@ -120,42 +131,49 @@ async function loadData() {
     return;
   }
 
-  if (!opReady("listTaskLists") || !opReady("listTasks")) {
-    store.lists = [];
-    store.tasks = [];
-    renderAll();
-    showBanner(
-      "尚未发现 rpcid，无法读取真实数据。先在会话窗口登录 Google，然后到工作台抓包并把 rpcid 固化到操作映射里。",
-      [
-        { label: "载入演示数据", onClick: () => toggleDemo(true) },
-      ]
-    );
-    return;
-  }
-
   try {
+    const payload = await api("/api/tasks");
+    const snapshot = payload.snapshot || {};
+    store.lists = snapshot.lists || [];
+    store.tasks = snapshot.tasks || [];
+    store.account = { id: snapshot.account || "", email: payload.email || "" };
+    // 刷新后原来选中的清单可能已被删除。
+    if (!store.lists.some((list) => list.id === store.activeListId) && !isVirtual(store.activeListId)) {
+      store.activeListId = VIRTUAL_ALL;
+    }
     if (store.expired) expiredBanner();
     else hideBanner();
-    // rpcid 已知，但响应结构仍需按抓包结果实现解析。
-    await execute("listTaskLists", {});
-    toast("listTaskLists 已调用，响应解析尚未实现（见工作台抓包结果）");
-    store.lists = [];
-    store.tasks = [];
     renderAll();
   } catch (error) {
     store.lists = [];
     store.tasks = [];
     renderAll();
-    showBanner(`读取失败：${error.message}`, [{ label: "载入演示数据", onClick: () => toggleDemo(true) }]);
+    showBanner(`读取失败：${error.message}`, [
+      { label: "重试", onClick: () => loadData() },
+      { label: "打开登录窗口", onClick: () => api("/api/session", { method: "POST", body: { action: "show" } }).catch(() => {}) },
+      { label: "载入演示数据", onClick: () => toggleDemo(true) },
+    ]);
   }
+}
+
+function isVirtual(listId) {
+  return listId === VIRTUAL_ALL || listId === VIRTUAL_STARRED;
+}
+
+// 新建任务要落到一个真实清单里；在「所有任务 / 已加星标」下沿用网页端的做法，
+// 用侧栏里的第一个清单。
+function targetListId() {
+  if (!isVirtual(store.activeListId)) return store.activeListId;
+  return (store.lists[0] || {}).id || "";
 }
 
 function seedDemo() {
   store.lists = [
-    { id: "list-work", title: "工作" },
-    { id: "list-personal", title: "个人" },
-    { id: "list-shopping", title: "采购清单" },
+    { id: "list-work", title: "工作", incomplete: 2, completedTotal: 1 },
+    { id: "list-personal", title: "个人", incomplete: 2, completedTotal: 0 },
+    { id: "list-shopping", title: "采购清单", incomplete: 1, completedTotal: 1 },
   ];
+  store.account = { id: "", email: "demo@example.com" };
   const today = new Date();
   const iso = (offsetDays) => {
     const d = new Date(today);
@@ -163,15 +181,15 @@ function seedDemo() {
     return d.toISOString().slice(0, 10);
   };
   store.tasks = [
-    { id: "t1", listId: VIRTUAL_MY, title: "回复设计评审邮件", notes: "附上最新一版的交互稿链接", starred: true, completed: false, due: { date: iso(0), time: "18:00" } },
-    { id: "t2", listId: VIRTUAL_MY, title: "整理逆向抓包结果", notes: "", starred: false, completed: false, due: { date: iso(1), time: "" }, recurrence: "每周" },
-    { id: "t3", listId: VIRTUAL_MY, title: "把 rpcid 固化进操作映射", notes: "", starred: false, completed: false, parent: "t2" },
-    { id: "t4", listId: VIRTUAL_MY, title: "校对像素级还原度", notes: "和 tasks.google.com 并排比对", starred: false, completed: true, due: { date: iso(-2), time: "" } },
+    { id: "t1", listId: "list-work", title: "回复设计评审邮件", notes: "附上最新一版的交互稿链接", starred: true, completed: false, due: { date: iso(0), time: "18:00" } },
+    { id: "t2", listId: "list-work", title: "整理逆向抓包结果", notes: "", starred: false, completed: false, due: { date: iso(1), time: "" }, recurrence: "每周" },
+    { id: "t3", listId: "list-work", title: "把 rpcid 固化进操作映射", notes: "", starred: false, completed: false, parent: "t2" },
+    { id: "t4", listId: "list-work", title: "校对像素级还原度", notes: "和 tasks.google.com 并排比对", starred: false, completed: true, completedAt: new Date(Date.now() - 2 * 86400000).toISOString(), due: { date: iso(-2), time: "" } },
     { id: "t5", listId: "list-work", title: "准备季度规划材料", notes: "", starred: true, completed: false, due: { date: iso(3), time: "10:30" } },
     { id: "t6", listId: "list-work", title: "评审 batchexecute 解码结果", notes: "", starred: false, completed: false },
     { id: "t7", listId: "list-personal", title: "预约牙医", notes: "", starred: false, completed: false, due: { date: iso(-1), time: "09:00" } },
     { id: "t8", listId: "list-shopping", title: "咖啡豆", notes: "", starred: false, completed: false },
-    { id: "t9", listId: "list-shopping", title: "滤纸", notes: "", starred: false, completed: true },
+    { id: "t9", listId: "list-shopping", title: "滤纸", notes: "", starred: false, completed: true, completedAt: new Date(Date.now() - 86400000).toISOString() },
   ];
 }
 
@@ -191,16 +209,15 @@ function toggleDemo(force) {
 
 /* --------------------------------------------------------------- select */
 
+function tasksOf(listId) {
+  return store.tasks.filter((t) => t.listId === listId);
+}
+
 function visibleTasks() {
-  const listId = store.activeListId;
-  if (listId === VIRTUAL_STARRED) {
+  if (store.activeListId === VIRTUAL_STARRED) {
     return store.tasks.filter((t) => t.starred && !t.completed);
   }
-  if (listId === VIRTUAL_COMPLETED) {
-    return store.tasks.filter((t) => t.completed);
-  }
-  const scope = listId === VIRTUAL_MY ? [VIRTUAL_MY] : [listId];
-  return store.tasks.filter((t) => scope.includes(t.listId) && !t.completed);
+  return store.tasks.filter((t) => t.listId === store.activeListId && !t.completed);
 }
 
 // Orders tasks so children follow their parent, mirroring the web app.
@@ -223,15 +240,14 @@ function orderedTasks(tasks) {
 function activeListTitle() {
   switch (store.activeListId) {
     case VIRTUAL_STARRED: return "已加星标";
-    case VIRTUAL_COMPLETED: return "已完成的任务";
-    case VIRTUAL_MY: return "我的任务";
-    default: return (store.lists.find((l) => l.id === store.activeListId) || {}).title || "我的任务";
+    case VIRTUAL_ALL: return "所有任务";
+    default: return (store.lists.find((l) => l.id === store.activeListId) || {}).title || "所有任务";
   }
 }
 
 /* --------------------------------------------------------------- render */
 
-function navItem({ id, icon, label, count, active }) {
+function navItem({ id, icon, label, count, active, onClick }) {
   const button = document.createElement("button");
   button.className = "nav-item" + (active ? " active" : "");
   const iconSpan = document.createElement("span");
@@ -247,72 +263,209 @@ function navItem({ id, icon, label, count, active }) {
     countSpan.textContent = String(count);
     button.append(countSpan);
   }
-  button.addEventListener("click", () => selectList(id));
+  button.addEventListener("click", onClick || (() => selectList(id)));
   return button;
 }
 
+// 侧栏与网页端一致：所有任务、已加星标、可折叠的「任务列表」分组（每项带未完成
+// 数量），最后是新建任务列表。
 function renderSidebar() {
   const nav = $("listNav");
   nav.innerHTML = "";
+  nav.append(navItem({
+    id: VIRTUAL_ALL,
+    icon: ICON.allTasks,
+    label: "所有任务",
+    active: store.activeListId === VIRTUAL_ALL,
+  }));
   nav.append(navItem({
     id: VIRTUAL_STARRED,
     icon: ICON.star,
     label: "已加星标",
     active: store.activeListId === VIRTUAL_STARRED,
   }));
-  nav.append(navItem({
-    id: VIRTUAL_MY,
-    icon: ICON.myTasks,
-    label: "我的任务",
-    active: store.activeListId === VIRTUAL_MY,
-  }));
 
-  if (store.lists.length) {
-    const sep = document.createElement("div");
-    sep.className = "nav-sep";
-    nav.append(sep);
-    for (const list of store.lists) {
-      nav.append(navItem({
-        id: list.id,
-        icon: ICON.list,
-        label: list.title,
-        active: store.activeListId === list.id,
-      }));
-    }
+  const head = document.createElement("div");
+  head.className = "nav-group-head";
+  const headLabel = document.createElement("span");
+  headLabel.textContent = "任务列表";
+  const collapse = document.createElement("button");
+  collapse.className = "icon-btn tiny";
+  collapse.innerHTML = store.listsCollapsed ? ICON.expandMore : ICON.expandLess;
+  collapse.title = store.listsCollapsed ? "展开任务列表" : "收起任务列表";
+  collapse.addEventListener("click", () => {
+    store.listsCollapsed = !store.listsCollapsed;
+    renderSidebar();
+  });
+  head.append(headLabel, collapse);
+  nav.append(head);
+
+  if (store.listsCollapsed) return;
+
+  for (const list of store.lists) {
+    nav.append(navItem({
+      id: list.id,
+      icon: ICON.list,
+      label: list.title,
+      count: list.incomplete,
+      active: store.activeListId === list.id,
+    }));
   }
+  nav.append(navItem({
+    icon: ICON.add,
+    label: "新建任务列表",
+    onClick: () => $("btnNewList").click(),
+  }));
+}
 
-  const completedActive = store.activeListId === VIRTUAL_COMPLETED;
-  $("navCompleted").classList.toggle("active", completedActive);
+function renderAccount() {
+  const label = $("accountLabel");
+  if (!label) return;
+  const { email, id } = store.account;
+  label.textContent = email || (store.demo ? "演示数据" : id || "未登录");
+  label.title = email && id ? `${email}（${id}）` : label.textContent;
 }
 
 function renderTasks() {
   $("listTitle").textContent = activeListTitle();
+  renderComposerHint();
   const container = $("taskList");
   container.innerHTML = "";
 
-  const tasks = orderedTasks(visibleTasks());
-  if (tasks.length === 0) {
-    const empty = document.createElement("div");
-    empty.className = "empty";
-    empty.innerHTML = ICON.empty;
-    const line = document.createElement("div");
-    line.textContent = store.demo ? "太好了，没有待办任务！" : "暂无任务";
-    empty.append(line);
-    container.append(empty);
+  if (store.activeListId === VIRTUAL_ALL) {
+    const sections = store.lists
+      .map((list) => ({ list, tasks: tasksOf(list.id) }))
+      .filter((section) => section.tasks.length > 0);
+    if (!sections.length) {
+      container.append(emptyState());
+      return;
+    }
+    for (const section of sections) container.append(renderSection(section.list, section.tasks));
     return;
   }
 
-  for (const task of tasks) container.append(renderTask(task));
+  if (store.activeListId === VIRTUAL_STARRED) {
+    const starred = orderedTasks(visibleTasks());
+    if (!starred.length) {
+      container.append(emptyState("没有已加星标的任务"));
+      return;
+    }
+    for (const task of starred) container.append(renderTask(task));
+    return;
+  }
+
+  const list = store.lists.find((item) => item.id === store.activeListId);
+  const tasks = tasksOf(store.activeListId);
+  if (!tasks.length) {
+    container.append(emptyState());
+    return;
+  }
+  // 单个清单视图里标题已经在页头，不再重复一遍。
+  container.append(renderSection(list, tasks, { bare: true }));
+}
+
+// 在「所有任务 / 已加星标」下，底部输入框要把新任务落到哪个清单并不显然，
+// 所以把目标写进 placeholder。
+function renderComposerHint() {
+  const input = $("inputNewTask");
+  if (!input) return;
+  if (!isVirtual(store.activeListId)) {
+    input.placeholder = "添加任务";
+    return;
+  }
+  const target = store.lists.find((list) => list.id === targetListId());
+  input.placeholder = target ? `添加到「${target.title}」` : "添加任务";
+}
+
+function emptyState(text) {
+  const empty = document.createElement("div");
+  empty.className = "empty";
+  empty.innerHTML = ICON.empty;
+  const line = document.createElement("div");
+  line.textContent = text || (store.demo ? "太好了，没有待办任务！" : "暂无任务");
+  empty.append(line);
+  return empty;
+}
+
+// 一个清单的一段：清单名（仅「所有任务」里显示）、未完成任务、「已完成 (N)」折叠
+// 头，展开后是已完成任务。与网页端同一段结构。
+function renderSection(list, tasks, { bare = false } = {}) {
+  const section = document.createElement("section");
+  section.className = "task-section";
+
+  if (!bare && list) {
+    const head = document.createElement("div");
+    head.className = "section-head";
+    const name = document.createElement("button");
+    name.className = "section-name";
+    name.textContent = list.title;
+    name.title = `打开「${list.title}」`;
+    name.addEventListener("click", () => selectList(list.id));
+    head.append(name);
+    section.append(head);
+  }
+
+  for (const task of orderedTasks(tasks.filter((item) => !item.completed))) {
+    section.append(renderTask(task));
+  }
+
+  const completed = tasks.filter((item) => item.completed);
+  const total = list ? Math.max(list.completedTotal || 0, completed.length) : completed.length;
+  if (total > 0) section.append(completedToggle(list, total, completed.length));
+  if (list && store.expandedCompleted.has(list.id)) {
+    for (const task of orderedTasks(completed)) section.append(renderTask(task));
+    // 快照每个清单只带回前 10 条已完成任务，网页端靠「加载更多」翻页。
+    if (completed.length < total) section.append(partialHint(total - completed.length));
+  }
+  return section;
+}
+
+function completedToggle(list, total, loaded) {
+  const row = document.createElement("button");
+  row.className = "completed-toggle";
+  const open = !!list && store.expandedCompleted.has(list.id);
+  const icon = document.createElement("span");
+  icon.className = "nav-icon";
+  icon.innerHTML = open ? ICON.expandMore : ICON.chevron;
+  const label = document.createElement("span");
+  label.textContent = `已完成 (${total})`;
+  row.append(icon, label);
+  if (list) {
+    row.addEventListener("click", () => {
+      if (open) store.expandedCompleted.delete(list.id);
+      else store.expandedCompleted.add(list.id);
+      renderTasks();
+    });
+  }
+  return row;
+}
+
+function partialHint(missing) {
+  const row = document.createElement("div");
+  row.className = "partial-hint";
+  row.textContent = `还有 ${missing} 条已完成任务未载入（快照每个清单只返回前 10 条，需要 listTasks 的 rpcid 翻页）`;
+  return row;
+}
+
+// 网页端的写法是「完成日期：11月17日周二」，跨年时才带年份。
+function formatCompletedDate(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const weekday = "日一二三四五六"[date.getDay()];
+  const year = date.getFullYear() === new Date().getFullYear() ? "" : `${date.getFullYear()}年`;
+  return `${year}${date.getMonth() + 1}月${date.getDate()}日周${weekday}`;
 }
 
 function renderTask(task) {
   const row = document.createElement("div");
   row.className = `task depth-${task.depth || 0}` + (task.completed ? " done" : "") + (task.id === store.activeTaskId ? " selected" : "");
+  row.dataset.id = task.id;
   row.addEventListener("click", () => openDetail(task.id));
 
   const box = document.createElement("button");
   box.className = "checkbox";
-  box.title = task.completed ? "标记为未完成" : "标记为完成";
+  box.title = task.completed ? "标记为未完成" : "标记为已完成";
+  box.setAttribute("aria-label", box.title);
   box.innerHTML = ICON.check;
   box.addEventListener("click", (event) => {
     event.stopPropagation();
@@ -325,6 +478,14 @@ function renderTask(task) {
   title.className = "task-title";
   title.textContent = task.title;
   main.append(title);
+
+  // 网页端在标题下面直接显示说明的前几行。
+  if (!task.completed && task.notes) {
+    const notes = document.createElement("div");
+    notes.className = "task-notes";
+    notes.textContent = task.notes;
+    main.append(notes);
+  }
 
   const chips = [];
   if (task.due && task.due.date) chips.push(dueChip(task));
@@ -343,25 +504,58 @@ function renderTask(task) {
     main.append(meta);
   }
 
+  if (task.completed && task.completedAt) {
+    const line = document.createElement("div");
+    line.className = "task-completed-date";
+    line.textContent = `完成日期：${formatCompletedDate(task.completedAt)}`;
+    main.append(line);
+  }
+
   const actions = document.createElement("div");
   actions.className = "task-actions";
-  const star = document.createElement("button");
-  star.className = "icon-btn star-btn" + (task.starred ? " on always" : "");
-  star.title = task.starred ? "取消星标" : "加星标";
-  star.innerHTML = task.starred ? ICON.starOn : ICON.star;
-  star.addEventListener("click", (event) => {
-    event.stopPropagation();
-    toggleStar(task);
-  });
+  if (task.completed) {
+    // 网页端在已完成行上只放删除，星标和选项都收进详情页。
+    const remove = document.createElement("button");
+    remove.className = "icon-btn";
+    remove.title = "删除任务";
+    remove.setAttribute("aria-label", "删除任务");
+    remove.innerHTML = ICON.trash;
+    remove.addEventListener("click", (event) => {
+      event.stopPropagation();
+      deleteTask(task.id);
+    });
+    actions.append(remove);
+  } else {
+    const more = document.createElement("button");
+    more.className = "icon-btn";
+    more.title = "任务选项";
+    more.setAttribute("aria-label", "任务选项");
+    more.innerHTML = ICON.more;
+    more.addEventListener("click", (event) => {
+      event.stopPropagation();
+      openDetail(task.id);
+    });
+    const star = document.createElement("button");
+    star.className = "icon-btn star-btn" + (task.starred ? " on always" : "");
+    star.title = task.starred ? "从“已加星标”中移除" : "添加到“已加星标”";
+    star.setAttribute("aria-label", star.title);
+    star.innerHTML = task.starred ? ICON.starOn : ICON.star;
+    star.addEventListener("click", (event) => {
+      event.stopPropagation();
+      toggleStar(task);
+    });
+    actions.append(more, star);
+  }
   const open = document.createElement("button");
   open.className = "icon-btn";
-  open.title = "打开详情";
+  open.title = "详细信息";
+  open.setAttribute("aria-label", "详细信息");
   open.innerHTML = ICON.chevron;
   open.addEventListener("click", (event) => {
     event.stopPropagation();
     openDetail(task.id);
   });
-  actions.append(star, open);
+  actions.append(open);
 
   row.append(box, main, actions);
   return row;
@@ -601,7 +795,7 @@ async function createTask(title, parentId) {
   if (store.demo) {
     store.tasks.push({
       id: "demo-" + Date.now(),
-      listId: store.activeListId === VIRTUAL_STARRED || store.activeListId === VIRTUAL_COMPLETED ? VIRTUAL_MY : store.activeListId,
+      listId: targetListId(),
       title,
       notes: "",
       starred: false,
@@ -611,21 +805,27 @@ async function createTask(title, parentId) {
     renderAll();
     return;
   }
+  const listId = targetListId();
+  if (!listId) {
+    toast("还没有清单，先新建一个任务列表", true);
+    return;
+  }
   if (!requireOp("createTask")) return;
   try {
-    await execute("createTask", { Title: title, TaskListID: store.activeListId, ParentID: parentId || "" });
+    await execute("createTask", { Title: title, TaskListID: listId, ParentID: parentId || "" });
     await loadData();
   } catch (error) {
     toast(error.message, true);
   }
 }
 
-async function deleteTask() {
-  const task = findTask(store.activeTaskId);
+// 详情页的删除按钮和已完成行上的删除图标共用这条路径。
+async function deleteTask(taskId) {
+  const task = findTask(taskId || store.activeTaskId);
   if (!task) return;
   if (store.demo) {
     store.tasks = store.tasks.filter((t) => t.id !== task.id && t.parent !== task.id);
-    closeDetail();
+    if (store.activeTaskId === task.id) closeDetail();
     renderAll();
     return;
   }
@@ -633,7 +833,7 @@ async function deleteTask() {
   try {
     await execute("deleteTask", { TaskID: task.id, TaskListID: task.listId });
     store.tasks = store.tasks.filter((t) => t.id !== task.id);
-    closeDetail();
+    if (store.activeTaskId === task.id) closeDetail();
     renderAll();
   } catch (error) {
     toast(error.message, true);
@@ -648,6 +848,7 @@ function selectList(id) {
 
 function renderAll() {
   renderSidebar();
+  renderAccount();
   renderTasks();
   if (store.activeTaskId) renderDetail();
   else $("detailPanel").hidden = true;
@@ -663,8 +864,14 @@ function bindUI() {
     toast(`主题：${THEME_LABEL[mode]}`);
   });
   $("btnCloseDetail").addEventListener("click", closeDetail);
-  $("btnDeleteTask").addEventListener("click", deleteTask);
-  $("navCompleted").addEventListener("click", () => selectList(VIRTUAL_COMPLETED));
+  $("btnDeleteTask").addEventListener("click", () => deleteTask());
+  $("btnRefresh").addEventListener("click", () => {
+    if (store.demo) {
+      toast("演示模式下不联网，先关掉演示再刷新", true);
+      return;
+    }
+    loadData();
+  });
 
   const input = $("inputNewTask");
   const submit = () => {

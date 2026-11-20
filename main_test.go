@@ -81,8 +81,10 @@ func TestAssetHandlerRoutesAPI(t *testing.T) {
 	if state.OpsTotal == 0 {
 		t.Fatal("state should report the bundled operation catalogue")
 	}
-	if state.OpsReady != 0 {
-		t.Fatalf("a fresh catalogue has no discovered operations, got %d", state.OpsReady)
+	// The read path ships discovered; every write operation still has to be
+	// captured per account.
+	if state.OpsReady != 1 {
+		t.Fatalf("expected only the snapshot operation to be discovered, got %d", state.OpsReady)
 	}
 }
 
@@ -103,8 +105,29 @@ func TestAssetHandlerListsOperations(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("ops payload is not JSON: %v", err)
 	}
-	if payload.Total != len(payload.Pending) || payload.Ready != 0 {
-		t.Fatalf("expected every bundled operation to be pending, got %+v", payload)
+	if payload.Ready != 1 || payload.Total != len(payload.Pending)+1 {
+		t.Fatalf("expected every operation but the snapshot to be pending, got %+v", payload)
+	}
+	for _, op := range payload.Pending {
+		if op == string(tasks.OpSnapshot) {
+			t.Fatalf("%s should not be pending", tasks.OpSnapshot)
+		}
+	}
+}
+
+// Without a bound session window the read path cannot reach Google, and must
+// say so instead of returning an empty task list the UI would render as
+// "no tasks".
+func TestAssetHandlerTasksNeedsASession(t *testing.T) {
+	handler := newTestHandler(t)
+
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/tasks", nil))
+	if response.Code == http.StatusOK {
+		t.Fatalf("expected a failure without a bound session window, got 200: %s", response.Body.String())
+	}
+	if !strings.Contains(response.Body.String(), "error") {
+		t.Fatalf("expected a JSON error body, got %s", response.Body.String())
 	}
 }
 

@@ -117,12 +117,41 @@ cookie 失效之后 SPA 仍留着旧的 `WIZ_global_data`，页面上 `SNlM0e` �
 `__Secure-1PSIDTS` 这类 cookie 轮换由网页自己的 JS 完成（会话窗口加载的是真实
 tasks.google.com），本项目不做轮换；轮换失败最终表现为 401 / 重定向，同样被健康检查兜住。
 
+## 读取层：一次 RPC 拿回整份数据
+
+网页版切换清单、点「已加星标」、展开「已完成」时**都不会再发请求**——所有视图都由首屏
+那一次数据在本地渲染。所以读取层只需要一个 rpcid：
+
+| | |
+| --- | --- |
+| rpcid | `Yz8iP`（页面 `window.AF_dataServiceRequests["ds:0"].id`） |
+| 端点 | `/_/TasksWebEmbedUi/data/batchexecute`（页面在 `WIZ_global_data.Im6cmf` 里公布） |
+| 参数 | 空数组 |
+| 返回 | 全部清单 + 未完成任务（含服务端声明的显示顺序）+ 每个清单前 10 条已完成任务 + 星标位 + 清单顺序 |
+
+响应是**位置数组**而不是带键的对象，Google 也不公布任何 schema，所以
+`internal/tasks/model.go` 里的槽位映射是靠「活响应 ↔ 渲染后的 DOM」逐位比对定下来的：
+
+- 任务 `inner[1][13]` 是星标布尔、`inner[1][14]` 是加星时间 —— 官方 API 完全没有的字段
+- 清单 `d[2][0]` 是服务端声明的未完成任务显示顺序，**它是唯一可信的排序依据**
+  （任务自带的 `inner[7]` 排序键并不单调）
+- 清单 `d[9]` 是真实已完成总数，比快照实际带回的多（每清单只回前 10 条），
+  正好是网页「已完成 (44)」那个数字
+- 已完成任务按 `completedAt` 倒序渲染，与网页一致
+
+还没定下含义的槽位不会被丢掉，而是原样收进 `SlotBag`（`Extra` / `DetailExtra` /
+`MetaExtra`）随 `/api/tasks` 一起返回：Google 改结构时会先在这里冒出来，
+而不是表现为「某个字段悄悄没了」。`internal/tasks/model_test.go` 用一份合成快照
+把每个槽位钉死（不含任何真实任务内容）。
+
+主界面因此只有一个数据接口：`GET /api/tasks`。
+
 ## 操作映射：把抓包变成能力
 
 rpcid 和参数结构没有文档，只能从活的网页上抓。抓到之后要能复用，所以有一层
-**操作注册表**（`internal/tasks/operations.json`）：22 个逻辑操作（`setStarred`、
-`setDueDateTime`、`setRecurrence`、`moveTask`……）每个对应一到多个 batchexecute 调用，
-参数是 `text/template` 模板：
+**操作注册表**（`internal/tasks/operations.json`）：23 个逻辑操作（读取用的 `snapshot`
+已固化；`setStarred`、`setDueDateTime`、`setRecurrence`、`moveTask`……等待抓包）每个对应
+一到多个 batchexecute 调用，参数是 `text/template` 模板：
 
 ```json
 { "op": "setStarred",
@@ -215,7 +244,16 @@ go test ./...
 
 ## 待办
 
-- [ ] 按抓包结果实现各 op 的**响应解析**（`app.js` 里 `loadData()` 已留好位置）
+- [x] 读取层：`snapshot`（`Yz8iP`）解析 + `GET /api/tasks` + 主界面接真实数据
+      （侧栏「所有任务 / 已加星标 / 任务列表（带数量）/ 新建任务列表」、
+      每清单「已完成 (N)」折叠段、已完成行的「完成日期：M月D日周X」）
+- [ ] 写入类 op 的 rpcid：新建 / 完成 / 加星 / 删除 / 拖拽 / 日期时分 / 重复
+      （在会话窗口里做一遍动作即可抓到）
+- [ ] 截止日期的槽位：读取快照里该账号没有带日期的任务，等一次 `setDueDateTime`
+      抓包顺带确认
+- [ ] 已完成翻页：快照每清单只回前 10 条，需要抓「加载更多」那个 rpcid
+- [ ] 「所有任务」视图：网页在宽屏下把每个清单渲染成横向并排的列，
+      客户端目前按纵向分段渲染（内容一致、更适合桌面窗口），待确认是否改成横向
 - [ ] 主界面与真实网页并排比对，收敛像素级差异（把会话窗口拖到旁边即可）
 - [x] 深色主题（侧栏三态按钮：浅色 → 深色 → 跟随系统，选择存 `localStorage`）
 - [x] Windows / Linux 桥接对齐（bootstrap 注入路径、`IsMainFrame` 过滤）+ 交叉编译验证

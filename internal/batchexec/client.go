@@ -8,8 +8,11 @@ import (
 	"gtasks/internal/bridge"
 )
 
-// DefaultPath is the batchexecute endpoint used by the Tasks web app.
-const DefaultPath = "/_/TasksUi/data/batchexecute"
+// DefaultPath is the batchexecute endpoint used by the Tasks web app. It is
+// only a fallback: the page publishes its own mount point in
+// WIZ_global_data.Im6cmf and the bridge prefers that, so a Google-side rename
+// does not break the client.
+const DefaultPath = "/_/TasksWebEmbedUi/data/batchexecute"
 
 // Session is a snapshot of the Google page the bridge is attached to.
 type Session struct {
@@ -136,6 +139,101 @@ func (c *Client) Batch(ctx context.Context, calls []Call, options Options) (*Bat
 	}
 	result.Responses = responses
 	return &result, nil
+}
+
+// InitDataKey describes one server-rendered payload embedded in the page HTML.
+type InitDataKey struct {
+	Key  string `json:"key"`
+	Hash string `json:"hash"`
+	// Size is the JSON length of the payload, used to decide how to page it.
+	Size int `json:"size"`
+}
+
+// InitData is one AF_initDataCallback payload. Tasks ships its first screen
+// (every task list and task) this way instead of an RPC, so reading it is what
+// makes the client render real data before any rpcid is known.
+type InitData struct {
+	Key       string          `json:"key"`
+	Hash      string          `json:"hash"`
+	Found     bool            `json:"found"`
+	Truncated bool            `json:"truncated"`
+	Size      int             `json:"size"`
+	Data      json.RawMessage `json:"data,omitempty"`
+}
+
+// InitDataKeys lists the embedded payloads the page has received so far.
+func (c *Client) InitDataKeys(ctx context.Context) ([]InitDataKey, error) {
+	raw, err := c.bridge.Call(ctx, "initDataKeys", nil)
+	if err != nil {
+		return nil, err
+	}
+	var payload struct {
+		Keys []InitDataKey `json:"keys"`
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return nil, fmt.Errorf("batchexec: 解析初始化数据清单失败: %w", err)
+	}
+	return payload.Keys, nil
+}
+
+// InitData fetches one embedded payload by key.
+func (c *Client) InitData(ctx context.Context, key string) (*InitData, error) {
+	raw, err := c.bridge.Call(ctx, "initData", map[string]any{"key": key})
+	if err != nil {
+		return nil, err
+	}
+	var payload struct {
+		Key       string `json:"key"`
+		Hash      string `json:"hash"`
+		Found     bool   `json:"found"`
+		Truncated bool   `json:"truncated"`
+		Size      int    `json:"size"`
+		Data      string `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return nil, fmt.Errorf("batchexec: 解析初始化数据失败: %w", err)
+	}
+	result := &InitData{
+		Key:       payload.Key,
+		Hash:      payload.Hash,
+		Found:     payload.Found,
+		Truncated: payload.Truncated,
+		Size:      payload.Size,
+	}
+	if payload.Found && !payload.Truncated && json.Valid([]byte(payload.Data)) {
+		result.Data = json.RawMessage(payload.Data)
+	}
+	return result, nil
+}
+
+// EvalResult carries the outcome of one in-page script evaluation.
+type EvalResult struct {
+	Truncated bool            `json:"truncated"`
+	Size      int             `json:"size"`
+	Result    json.RawMessage `json:"result,omitempty"`
+}
+
+// Eval runs a script inside the session page and returns its JSON value. It is
+// the reverse-engineering escape hatch: inspecting globals and driving read-only
+// UI interactions is how the rpcid catalogue gets discovered.
+func (c *Client) Eval(ctx context.Context, script string) (*EvalResult, error) {
+	raw, err := c.bridge.Call(ctx, "evalScript", map[string]any{"js": script})
+	if err != nil {
+		return nil, err
+	}
+	var payload struct {
+		Truncated bool   `json:"truncated"`
+		Size      int    `json:"size"`
+		Result    string `json:"result"`
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return nil, fmt.Errorf("batchexec: 解析 eval 结果失败: %w", err)
+	}
+	result := &EvalResult{Truncated: payload.Truncated, Size: payload.Size}
+	if json.Valid([]byte(payload.Result)) {
+		result.Result = json.RawMessage(payload.Result)
+	}
+	return result, nil
 }
 
 // HealthState is the outcome of one lightweight session probe.

@@ -1,27 +1,148 @@
 {
   "version": 1,
   "operations": [
-    { "op": "listTaskLists", "label": "列出所有清单", "steps": [], "notes": "抓包：应用启动后左侧清单列表加载时的那次调用。" },
-    { "op": "listTasks", "label": "列出清单内的任务", "steps": [], "notes": "抓包：点开任意一个清单。星标视图是单独一次调用。" },
-    { "op": "createTask", "label": "新建任务", "steps": [], "notes": "抓包：底部「添加任务」输入一行标题后回车。" },
-    { "op": "updateTaskTitle", "label": "修改任务标题", "steps": [], "notes": "抓包：点开任务详情，改标题后失焦。" },
-    { "op": "updateTaskNotes", "label": "修改任务备注", "steps": [], "notes": "抓包：详情页「添加说明」里输入内容后失焦。" },
-    { "op": "setStarred", "label": "加星 / 取消星标", "steps": [], "notes": "官方 API 缺失。抓包：点任务行右侧的星星。参数里应有一个布尔位。" },
-    { "op": "setDueDateTime", "label": "设置截止日期（含时分）", "steps": [], "notes": "官方 API 只保留日期。抓包：详情页「日期/时间」里同时选日期和时间。留意时间戳单位（秒/毫秒）与时区偏移放在第几位。" },
-    { "op": "clearDue", "label": "清除截止日期", "steps": [], "notes": "抓包：详情页移除已设置的日期。可能与 setDueDateTime 是同一个 rpcid。" },
-    { "op": "setRecurrence", "label": "设置重复规则", "steps": [], "notes": "官方 API 完全没有。抓包：详情页「重复」选每天/每周/每月。" },
-    { "op": "completeTask", "label": "勾选完成", "steps": [], "notes": "抓包：点任务行左侧圆圈。" },
-    { "op": "uncompleteTask", "label": "取消完成", "steps": [], "notes": "抓包：在「已完成」视图里取消勾选。可能与 completeTask 同 rpcid。" },
-    { "op": "moveTask", "label": "同清单内拖拽排序", "steps": [], "notes": "抓包：拖动任务改变顺序。留意锚点任务的 id 与「之前/之后」标志位。" },
-    { "op": "moveTaskToList", "label": "移动到其他清单", "steps": [], "notes": "抓包：详情页切换清单，或跨清单拖拽。" },
-    { "op": "addSubtask", "label": "添加子任务", "steps": [], "notes": "抓包：详情页「添加子任务」。注意嵌套深度限制。" },
-    { "op": "deleteTask", "label": "删除任务", "steps": [], "notes": "抓包：详情页删除。" },
-    { "op": "restoreTask", "label": "恢复已删除任务", "steps": [], "notes": "抓包：删除后弹出的撤销提示。" },
-    { "op": "clearCompleted", "label": "清空已完成", "steps": [], "notes": "抓包：清单菜单里的「删除已完成的任务」。" },
-    { "op": "createTaskList", "label": "新建清单", "steps": [], "notes": "抓包：左侧「创建新清单」。" },
-    { "op": "renameTaskList", "label": "重命名清单", "steps": [], "notes": "抓包：清单菜单里的「重命名」。" },
-    { "op": "deleteTaskList", "label": "删除清单", "steps": [], "notes": "抓包：清单菜单里的「删除清单」。" },
-    { "op": "reorderTaskLists", "label": "清单排序", "steps": [], "notes": "抓包：拖动左侧清单。" },
-    { "op": "searchTasks", "label": "搜索任务", "steps": [], "notes": "抓包：顶部搜索框输入关键字。" }
+    {
+      "op": "snapshot",
+      "label": "读取全部清单与任务",
+      "steps": [
+        {
+          "rpcid": "Yz8iP",
+          "args": "[]"
+        }
+      ],
+      "notes": "已确认。一次调用返回整份数据集：全部清单、未完成任务（含服务端声明的显示顺序）、每个清单前 10 条已完成任务、星标位、清单顺序。网页切换清单 / 已加星标 / 展开已完成时都不再发请求，全部由这一份数据在本地渲染，所以它就是这个客户端的整个读取层。参数为空数组。"
+    },
+    {
+      "op": "listTaskLists",
+      "label": "列出所有清单",
+      "steps": [],
+      "notes": "抓包：应用启动后左侧清单列表加载时的那次调用。"
+    },
+    {
+      "op": "listTasks",
+      "label": "列出清单内的任务",
+      "steps": [],
+      "notes": "抓包：点开任意一个清单。星标视图是单独一次调用。"
+    },
+    {
+      "op": "createTask",
+      "label": "新建任务",
+      "steps": [],
+      "notes": "抓包：底部「添加任务」输入一行标题后回车。"
+    },
+    {
+      "op": "updateTaskTitle",
+      "label": "修改任务标题",
+      "steps": [],
+      "notes": "抓包：点开任务详情，改标题后失焦。"
+    },
+    {
+      "op": "updateTaskNotes",
+      "label": "修改任务备注",
+      "steps": [],
+      "notes": "抓包：详情页「添加说明」里输入内容后失焦。"
+    },
+    {
+      "op": "setStarred",
+      "label": "加星 / 取消星标",
+      "steps": [],
+      "notes": "官方 API 缺失。抓包：点任务行右侧的星星。参数里应有一个布尔位。"
+    },
+    {
+      "op": "setDueDateTime",
+      "label": "设置截止日期（含时分）",
+      "steps": [],
+      "notes": "官方 API 只保留日期。抓包：详情页「日期/时间」里同时选日期和时间。留意时间戳单位（秒/毫秒）与时区偏移放在第几位。"
+    },
+    {
+      "op": "clearDue",
+      "label": "清除截止日期",
+      "steps": [],
+      "notes": "抓包：详情页移除已设置的日期。可能与 setDueDateTime 是同一个 rpcid。"
+    },
+    {
+      "op": "setRecurrence",
+      "label": "设置重复规则",
+      "steps": [],
+      "notes": "官方 API 完全没有。抓包：详情页「重复」选每天/每周/每月。"
+    },
+    {
+      "op": "completeTask",
+      "label": "勾选完成",
+      "steps": [],
+      "notes": "抓包：点任务行左侧圆圈。"
+    },
+    {
+      "op": "uncompleteTask",
+      "label": "取消完成",
+      "steps": [],
+      "notes": "抓包：在「已完成」视图里取消勾选。可能与 completeTask 同 rpcid。"
+    },
+    {
+      "op": "moveTask",
+      "label": "同清单内拖拽排序",
+      "steps": [],
+      "notes": "抓包：拖动任务改变顺序。留意锚点任务的 id 与「之前/之后」标志位。"
+    },
+    {
+      "op": "moveTaskToList",
+      "label": "移动到其他清单",
+      "steps": [],
+      "notes": "抓包：详情页切换清单，或跨清单拖拽。"
+    },
+    {
+      "op": "addSubtask",
+      "label": "添加子任务",
+      "steps": [],
+      "notes": "抓包：详情页「添加子任务」。注意嵌套深度限制。"
+    },
+    {
+      "op": "deleteTask",
+      "label": "删除任务",
+      "steps": [],
+      "notes": "抓包：详情页删除。"
+    },
+    {
+      "op": "restoreTask",
+      "label": "恢复已删除任务",
+      "steps": [],
+      "notes": "抓包：删除后弹出的撤销提示。"
+    },
+    {
+      "op": "clearCompleted",
+      "label": "清空已完成",
+      "steps": [],
+      "notes": "抓包：清单菜单里的「删除已完成的任务」。"
+    },
+    {
+      "op": "createTaskList",
+      "label": "新建清单",
+      "steps": [],
+      "notes": "抓包：左侧「创建新清单」。"
+    },
+    {
+      "op": "renameTaskList",
+      "label": "重命名清单",
+      "steps": [],
+      "notes": "抓包：清单菜单里的「重命名」。"
+    },
+    {
+      "op": "deleteTaskList",
+      "label": "删除清单",
+      "steps": [],
+      "notes": "抓包：清单菜单里的「删除清单」。"
+    },
+    {
+      "op": "reorderTaskLists",
+      "label": "清单排序",
+      "steps": [],
+      "notes": "抓包：拖动左侧清单。"
+    },
+    {
+      "op": "searchTasks",
+      "label": "搜索任务",
+      "steps": [],
+      "notes": "抓包：顶部搜索框输入关键字。"
+    }
   ]
 }

@@ -10,7 +10,9 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -287,10 +289,16 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.handleConfig(w, r)
 	case path == "/api/session/auto" && r.Method == http.MethodPost:
 		h.handleSessionAuto(w, r)
+	case path == "/api/eval" && r.Method == http.MethodPost:
+		h.handleEval(w, r)
+	case path == "/api/initdata" && r.Method == http.MethodGet:
+		h.handleInitData(w, r)
 	case path == "/api/call" && r.Method == http.MethodPost:
 		h.handleCall(w, r)
 	case path == "/api/decode" && r.Method == http.MethodPost:
 		h.handleDecode(w, r)
+	case path == "/api/tasks" && r.Method == http.MethodGet:
+		h.handleTasks(w, r)
 	default:
 		writeError(w, http.StatusNotFound, "未知接口: "+r.Method+" "+path)
 	}
@@ -423,6 +431,58 @@ func (h *Handler) handleSniffPost(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, control)
 }
 
+// handleEval 在会话页面里执行一段脚本，供逆向时查看全局对象或驱动只读交互。
+func (h *Handler) handleEval(w http.ResponseWriter, r *http.Request) {
+	var request struct {
+		JS string `json:"js"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		writeError(w, http.StatusBadRequest, "请求体不是合法 JSON")
+		return
+	}
+	if strings.TrimSpace(request.JS) == "" {
+		writeError(w, http.StatusBadRequest, "js 不能为空")
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
+	defer cancel()
+
+	result, err := h.client.Eval(ctx, request.JS)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, describe(err))
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+// handleInitData 暴露页面首屏内联数据：不带 key 时列清单，带 key 时返回该份数据。
+func (h *Handler) handleInitData(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
+	defer cancel()
+
+	key := r.URL.Query().Get("key")
+	if key == "" {
+		keys, err := h.client.InitDataKeys(ctx)
+		if err != nil {
+			writeError(w, http.StatusBadGateway, describe(err))
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"keys": keys})
+		return
+	}
+
+	payload, err := h.client.InitData(ctx, key)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, describe(err))
+		return
+	}
+	if !payload.Found {
+		writeError(w, http.StatusNotFound, "页面里没有这份初始化数据: "+key)
+		return
+	}
+	writeJSON(w, http.StatusOK, payload)
+}
+
 func (h *Handler) handleCall(w http.ResponseWriter, r *http.Request) {
 	var request struct {
 		RpcIDs  []string          `json:"rpcids"`
@@ -459,6 +519,82 @@ func (h *Handler) handleCall(w http.ResponseWriter, r *http.Request) {
 		payload["decodeError"] = describe(err)
 	}
 	writeJSON(w, http.StatusOK, payload)
+}
+
+// handleTasks returns the whole dataset parsed into the shape the main window
+// renders: lists in sidebar order, tasks in display order. The web app draws
+// every one of its views from this single payload, so the main window never
+// needs to call anything else to stay in sync with it.
+func (h *Handler) handleTasks(w http.ResponseWriter, _ *http.Request) {
+	if h.service == nil {
+		writeError(w, http.StatusServiceUnavailable, "任务服务未启用")
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), bridge.DefaultTimeout)
+	defer cancel()
+
+	snapshot, err := h.service.Snapshot(ctx)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, describe(err))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"snapshot": snapshot,
+		"email":    h.accountEmail(),
+	})
+}
+
+// accountEmail reads the signed-in address out of the page's own globals for the
+// header label. The key Google publishes it under is not stable across builds,
+// so the values are scanned instead of looked up; a miss is not an error.
+func (h *Handler) accountEmail() string {
+	cached := h.bridge.Info()
+	if len(cached) == 0 {
+		return ""
+	}
+	var page struct {
+		WizScalars map[string]any `json:"wizScalars"`
+	}
+	if err := json.Unmarshal(cached, &page); err != nil {
+		return ""
+	}
+	keys := make([]string, 0, len(page.WizScalars))
+	for key := range page.WizScalars {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		if text, ok := page.WizScalars[key].(string); ok && looksLikeEmail(text) {
+			return text
+		}
+	}
+	return ""
+}
+
+// looksLikeEmail is deliberately conservative. Several of the opaque blobs the
+// page publishes contain an @ as part of their own serialisation, so a value
+// only counts as an address when every character is one an address can have.
+func looksLikeEmail(text string) bool {
+	at := strings.IndexByte(text, '@')
+	if at <= 0 || at == len(text)-1 || strings.Count(text, "@") != 1 {
+		return false
+	}
+	domain := text[at+1:]
+	if !strings.Contains(domain, ".") {
+		return false
+	}
+	for _, character := range text {
+		switch {
+		case character >= 'a' && character <= 'z',
+			character >= 'A' && character <= 'Z',
+			character >= '0' && character <= '9',
+			character == '@' || character == '.' || character == '_' ||
+				character == '-' || character == '+':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 func (h *Handler) handleDecode(w http.ResponseWriter, r *http.Request) {

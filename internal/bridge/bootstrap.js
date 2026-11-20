@@ -19,6 +19,8 @@
 
   var PROTOCOL = "gtask1";
   var RESPONSE_LIMIT = 200000;
+  // 首屏数据可能很大（整个账号的任务），单独放宽上限并按 key 分次取回。
+  var INIT_DATA_LIMIT = 8000000;
 
   function pageHost() {
     try {
@@ -139,12 +141,28 @@
   // the same document must neither reset the flag nor orphan the fetch/XHR
   // wrappers the first copy installed.
 
+  // 抓包开关记在 localStorage：页面一刷新，注入的脚本就要抢在 Google 自己的
+  // 请求之前把 recorder 打开，否则最关键的初始化 RPC 全部丢失。
+  var SNIFF_KEY = "gtasks.sniff";
+
   function isSniffing() {
     return window.__gtaskSniffing === true;
   }
 
   function setSniffing(on) {
     window.__gtaskSniffing = !!on;
+    try {
+      if (on) localStorage.setItem(SNIFF_KEY, "1");
+      else localStorage.removeItem(SNIFF_KEY);
+    } catch (ignored) {}
+  }
+
+  function storedSniffing() {
+    try {
+      return localStorage.getItem(SNIFF_KEY) === "1";
+    } catch (ignored) {
+      return false;
+    }
   }
 
   function sniffStatus() {
@@ -177,6 +195,25 @@
     return entry;
   }
 
+  // Google 的 fetch 调用经常把表单放在 URLSearchParams 里，只认字符串会丢掉
+  // f.req 参数，逆向时就看不到真实入参。
+  function bodyText(init) {
+    if (!init) return null;
+    var body = init.body;
+    if (typeof body === "string") return body;
+    if (!body || typeof body.forEach !== "function") return null;
+    try {
+      var pairs = [];
+      body.forEach(function (value, key) {
+        if (typeof value !== "string") return;
+        pairs.push(encodeURIComponent(key) + "=" + encodeURIComponent(value));
+      });
+      return pairs.length ? pairs.join("&") : null;
+    } catch (ignored) {
+      return null;
+    }
+  }
+
   function record(entry) {
     if (!isSniffing()) return;
     window.__gtaskSniffed = (window.__gtaskSniffed || 0) + 1;
@@ -185,29 +222,55 @@
     post({ kind: "sniff", entry: entry });
   }
 
+  // 页面经常传 Request 对象而不是 (url, init)，此时 init 里没有 body，只能
+  // clone 出来异步读取，否则抓包看不到 f.req 入参。
+  function requestBodyPromise(input, init) {
+    var direct = bodyText(init);
+    if (direct !== null) return Promise.resolve(direct);
+    try {
+      if (input && typeof input.clone === "function" && (!input.method || String(input.method).toUpperCase() !== "GET")) {
+        return input.clone().text();
+      }
+    } catch (ignored) {}
+    return Promise.resolve(null);
+  }
+
+  function mergeRequestBody(entry, url, body) {
+    if (!entry || typeof body !== "string" || !body) return;
+    if (entry.freq || entry.freqRaw || entry.at) return;
+    var parsed = classify(url, body);
+    if (!parsed) return;
+    if (parsed.freq) entry.freq = parsed.freq;
+    if (parsed.freqRaw) entry.freqRaw = parsed.freqRaw;
+    if (parsed.at) entry.at = parsed.at;
+  }
+
   function installFetchSniffer() {
     if (window.__gtaskFetchPatched || typeof window.fetch !== "function") return;
     var original = window.fetch;
     var patched = function (input, init) {
       var url = typeof input === "string" ? input : (input && input.url) || "";
-      var body = init && typeof init.body === "string" ? init.body : null;
-      var entry = isSniffing() && !(init && init.__gtaskNoSniff) ? classify(url, body) : null;
+      var active = isSniffing() && !(init && init.__gtaskNoSniff);
+      var entry = active ? classify(url, bodyText(init)) : null;
       if (entry) entry.via = "fetch";
+      var pendingBody = active && entry ? requestBodyPromise(input, init) : null;
       var promise = original.apply(this, arguments);
       if (entry) {
         promise.then(function (response) {
+          var texts = [Promise.resolve(null), Promise.resolve(null)];
           try {
-            response.clone().text().then(function (text) {
-              entry.status = response.status;
-              entry.response = truncate(text);
-              record(entry);
-            }, function () {
-              entry.status = response.status;
-              record(entry);
-            });
-          } catch (ignored) {
+            texts[0] = response.clone().text();
+          } catch (ignored) {}
+          if (pendingBody) texts[1] = pendingBody;
+          Promise.all(texts).then(function (settled) {
+            entry.status = response.status;
+            if (typeof settled[0] === "string") entry.response = truncate(settled[0]);
+            mergeRequestBody(entry, url, settled[1]);
             record(entry);
-          }
+          }, function () {
+            entry.status = response.status;
+            record(entry);
+          });
         }, function () {});
       }
       return promise;
@@ -243,13 +306,113 @@
     window.__gtaskXHRPatched = true;
   }
 
+  // ---------------------------------------------------------- initial data
+  //
+  // Tasks 首屏并不发 batchexecute：清单和任务由 HTML 内联脚本通过
+  // AF_initDataCallback 注入。bootstrap 在文档开始时执行，因此可以抢在页面脚本
+  // 之前接管这个回调，把与网页完全一致的初始数据留在 window 上，读路径就不必
+  // 依赖尚未发现的 rpcid。
+  //
+  // 接管必须是无损的：页面自己赋值的实现要照常调用；若数据回调先于实现到达，
+  // 就先排队，等实现出现再按原顺序补放。
+
+  function resolveInitPayload(payload) {
+    if (!payload || typeof payload !== "object") return null;
+    var data = payload.data;
+    if (typeof data === "function") {
+      try {
+        data = data();
+      } catch (ignored) {
+        return null;
+      }
+    }
+    return { key: payload.key || "", hash: payload.hash || "", data: data };
+  }
+
+  function installInitDataRecorder() {
+    if (window.__gtaskInitPatched) return;
+    var store = {};
+    var order = [];
+    var implementation = null;
+    var queued = [];
+
+    var record = function (payload) {
+      try {
+        var resolved = resolveInitPayload(payload);
+        if (!resolved) return;
+        var key = resolved.key || resolved.hash;
+        if (!key) return;
+        if (!Object.prototype.hasOwnProperty.call(store, key)) order.push(key);
+        store[key] = resolved;
+      } catch (ignored) {}
+    };
+
+    var wrapped = function (payload) {
+      record(payload);
+      if (typeof implementation === "function") {
+        try {
+          return implementation.apply(this, arguments);
+        } catch (ignored) {
+          return undefined;
+        }
+      }
+      queued.push(arguments);
+      return undefined;
+    };
+
+    try {
+      Object.defineProperty(window, "AF_initDataCallback", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+          return wrapped;
+        },
+        set: function (value) {
+          implementation = value;
+          if (typeof value !== "function") return;
+          var pending = queued;
+          queued = [];
+          for (var index = 0; index < pending.length; index++) {
+            try {
+              value.apply(window, pending[index]);
+            } catch (ignored) {}
+          }
+        }
+      });
+    } catch (ignored) {
+      window.AF_initDataCallback = wrapped;
+    }
+
+    window.__gtaskInitData = {
+      keys: function () {
+        return order.map(function (key) {
+          var entry = store[key];
+          var size = 0;
+          try {
+            size = JSON.stringify(entry.data).length;
+          } catch (ignored) {}
+          return { key: entry.key, hash: entry.hash, size: size };
+        });
+      },
+      get: function (key) {
+        return Object.prototype.hasOwnProperty.call(store, key) ? store[key] : null;
+      }
+    };
+    window.__gtaskInitPatched = true;
+  }
+
   // ------------------------------------------------------------ batchexecute
 
   var requestCounter = Math.floor(Math.random() * 900000) + 100000;
 
   // health() 用一个必然不存在的 rpcid 发最小请求：会话活着时 Google 回 200 +
   // 一条错误帧；cookie 失效时回 401，或被 302 到 accounts.google.com 的登录页。
-  var HEALTH_RPC = "AAAAA";
+  // Im6cmf 是 Google 自己公布的 batchexecute 挂载点（当前为 /_/TasksWebEmbedUi）。
+  // Tasks 早就从 /_/TasksUi 搬走了，写死路径会一路 404。
+  var FALLBACK_MOUNT = "/_/TasksWebEmbedUi";
+  // 探针 rpcid：SOV0tb 只做服务器时间同步，无副作用，会话正常时回 200。
+  var HEALTH_RPC = "SOV0tb";
+  var HEALTH_ARGS = "[]";
 
   function authState(response) {
     if (response.status === 401 || response.status === 403) return "unauthorized";
@@ -259,6 +422,24 @@
     } catch (ignored) {}
     if (!response.ok) return "http" + response.status;
     return "ok";
+  }
+
+  function batchPath(opts, wiz) {
+    if (opts && opts.path) return opts.path;
+    var mount = wiz && typeof wiz.Im6cmf === "string" && wiz.Im6cmf ? wiz.Im6cmf : FALLBACK_MOUNT;
+    return mount.replace(/\/+$/, "") + "/data/batchexecute";
+  }
+
+  // 组装查询串，顺序与页面自身发出的请求保持一致，便于抓包对比。
+  function batchQuery(rpcids, opts, bl) {
+    var query = [
+      "rpcids=" + encodeURIComponent(rpcids.join(",")),
+      "source-path=" + encodeURIComponent(opts.sourcePath || location.pathname || "/")
+    ];
+    if (bl) query.push("bl=" + encodeURIComponent(bl));
+    query.push("_reqid=" + requestCounter++);
+    query.push("rt=" + encodeURIComponent(opts.rt || "c"));
+    return query.join("&");
   }
 
   function runBatch(id, rpcids, freqs, opts) {
@@ -289,15 +470,8 @@
     }
 
     var body = "f.req=" + encodeURIComponent(JSON.stringify([calls])) + "&at=" + encodeURIComponent(at) + "&";
-    var query = [
-      "rpcids=" + encodeURIComponent(rpcids.join(",")),
-      "source-path=" + encodeURIComponent(opts.sourcePath || location.pathname || "/"),
-      "_reqid=" + requestCounter++,
-      "rt=" + encodeURIComponent(opts.rt || "c")
-    ];
-    if (bl) query.splice(2, 0, "bl=" + encodeURIComponent(bl));
-    var path = opts.path || "/_/TasksUi/data/batchexecute";
-    var url = path + "?" + query.join("&");
+    var path = batchPath(opts, wiz);
+    var url = path + "?" + batchQuery(rpcids, opts, bl);
 
     var headers = { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" };
     if (opts.sameDomainHeader !== false) headers["X-Same-Domain"] = "1";
@@ -310,7 +484,9 @@
       body: body
     }).then(function (response) {
       return response.text().then(function (text) {
-        reply(id, response.ok, {
+        // HTTP 4xx/5xx 也是有效结果：状态码和 auth 判定要交给 Go 去决策，
+        // 这里一旦按失败回复，载荷就被丢掉，只能看到一句 "HTTP 404"。
+        reply(id, true, {
           status: response.status,
           auth: authState(response),
           url: url,
@@ -320,7 +496,7 @@
           rpcids: rpcids,
           elapsedMs: Date.now() - startedAt,
           raw: truncate(text)
-        }, response.ok ? "" : "HTTP " + response.status);
+        }, "");
       });
     }, function (error) {
       reply(id, false, null, String(error));
@@ -356,6 +532,86 @@
     sniffStatus: function (id) {
       reply(id, true, sniffStatus(), "");
     },
+    initDataKeys: function (id) {
+      var accessor = window.__gtaskInitData;
+      reply(id, true, { keys: accessor ? accessor.keys() : [] }, "");
+    },
+    initData: function (id, args) {
+      var accessor = window.__gtaskInitData;
+      var key = args && args.key;
+      if (!accessor || !key) {
+        reply(id, true, { key: key || "", found: false, data: null }, "");
+        return;
+      }
+      var entry = accessor.get(key);
+      if (!entry) {
+        reply(id, true, { key: key, found: false, data: null }, "");
+        return;
+      }
+      var text;
+      try {
+        text = JSON.stringify(entry.data);
+      } catch (error) {
+        reply(id, false, null, "初始化数据无法序列化: " + String(error));
+        return;
+      }
+      var truncated = text.length > INIT_DATA_LIMIT;
+      reply(id, true, {
+        key: entry.key,
+        hash: entry.hash,
+        found: true,
+        truncated: truncated,
+        size: text.length,
+        data: truncated ? text.slice(0, INIT_DATA_LIMIT) : text
+      }, "");
+    },
+    // 逆向用的通用逃生口：在页面上下文里执行一段脚本并取回 JSON 结果。只由
+    // 本机回环端口（带自定义头，跨站请求会被预检拦掉）触发。
+    evalScript: function (id, args) {
+      var source = (args && args.js) || "";
+      if (!source) {
+        reply(id, false, null, "eval 需要 js 参数");
+        return;
+      }
+      var finish = function (value) {
+        if (value && typeof value.then === "function") {
+          value.then(finish, function (error) {
+            reply(id, false, null, String(error));
+          });
+          return;
+        }
+        var text;
+        try {
+          text = JSON.stringify(value === undefined ? null : value);
+        } catch (error) {
+          reply(id, false, null, "结果无法序列化: " + String(error));
+          return;
+        }
+        if (text === undefined) text = "null";
+        var oversized = text.length > INIT_DATA_LIMIT;
+        reply(id, true, {
+          truncated: oversized,
+          size: text.length,
+          result: oversized ? text.slice(0, INIT_DATA_LIMIT) : text
+        }, "");
+      };
+      var value;
+      try {
+        value = new Function('"use strict";return (' + source + ');')();
+      } catch (error) {
+        try {
+          value = new Function('"use strict";' + source)();
+        } catch (statementError) {
+          reply(id, false, null, String(statementError));
+          return;
+        }
+      }
+      try {
+        finish(value);
+      } catch (error) {
+        reply(id, false, null, String(error));
+      }
+    },
     health: function (id) {
       var wiz = wizData();
       var at = wiz.SNlM0e || "";
@@ -363,17 +619,13 @@
         reply(id, true, { state: "anonymous", status: 0, at: "" }, "");
         return;
       }
-      var url = "/_/TasksUi/data/batchexecute?" + [
-        "rpcids=" + HEALTH_RPC,
-        "source-path=" + encodeURIComponent(location.pathname || "/"),
-        "_reqid=" + requestCounter++,
-        "rt=c"
-      ].join("&");
+      var bl = wiz.cfb2h || "";
+      var url = batchPath({}, wiz) + "?" + batchQuery([HEALTH_RPC], {}, bl);
       fetch(url, {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8", "X-Same-Domain": "1" },
-        body: "f.req=" + encodeURIComponent(JSON.stringify([[[HEALTH_RPC, "[]", null, "1"]]])) + "&at=" + encodeURIComponent(at) + "&",
+        body: "f.req=" + encodeURIComponent(JSON.stringify([[[HEALTH_RPC, HEALTH_ARGS, null, "1"]]])) + "&at=" + encodeURIComponent(at) + "&",
         __gtaskNoSniff: true
       }).then(function (response) {
         reply(id, true, { state: authState(response), status: response.status, at: at }, "");
@@ -404,6 +656,11 @@
   };
 
   window.__gtask = api;
+
+  installInitDataRecorder();
+
+  // 上一次开着抓包就立刻恢复，抢在页面自己的请求之前装好钩子。
+  if (storedSniffing()) setSniffing(true);
 
   installFetchSniffer();
   installXHRSniffer();

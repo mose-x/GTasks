@@ -10,7 +10,9 @@ import (
 	"embed"
 	"io/fs"
 	"log"
+	"net"
 	"net/http"
+	"os"
 	"runtime"
 	"time"
 
@@ -72,6 +74,12 @@ func main() {
 		DataDir:  dataDir,
 	})
 
+	// Loopback-only control plane: the very same handler the in-app asset
+	// server mounts, so the discovery workflow can be scripted with curl
+	// instead of clicking through the workbench. Binding strictly to loopback
+	// keeps it in the same trust domain as the local cookie store.
+	controlServer := startControlServer(apiHandler)
+
 	app := application.New(application.Options{
 		Name:        "GTasks",
 		Description: "Google Tasks 桌面客户端",
@@ -87,6 +95,9 @@ func main() {
 		OnShutdown: func() {
 			watcher.Stop()
 			recorder.Close()
+			if controlServer != nil {
+				_ = controlServer.Close()
+			}
 		},
 	})
 
@@ -111,11 +122,16 @@ func main() {
 	})
 
 	sessionOptions := application.WebviewWindowOptions{
-		Name:   sessionWindowName,
-		Title:  "Google 会话（登录 / RPC 通道）",
-		URL:    googleTasksURL,
-		Width:  460,
-		Height: 760,
+		Name:  sessionWindowName,
+		Title: "Google 会话（登录 / RPC 通道）",
+		URL:   googleTasksURL,
+		// Wide enough for tasks.google.com to use its desktop layout. At phone
+		// widths Google switches the 所有任务 view to horizontally paged list
+		// cards, which is not what the main window reproduces.
+		Width:     1200,
+		Height:    860,
+		MinWidth:  420,
+		MinHeight: 620,
 		// Re-executed after every navigation, including the redirect chain
 		// through accounts.google.com and back.
 		JS: bridge.BootstrapJS,
@@ -165,6 +181,47 @@ func main() {
 	if err := app.Run(); err != nil {
 		log.Fatal(err)
 	}
+}
+
+// startControlServer serves the API on 127.0.0.1 (override with GTASKS_API_ADDR,
+// use "" to disable). It returns nil when the port cannot be bound, which is
+// not fatal: the in-app windows keep working either way.
+func startControlServer(handler http.Handler) *http.Server {
+	addr := os.Getenv("GTASKS_API_ADDR")
+	if addr == "" {
+		addr = "127.0.0.1:17321"
+	}
+	if addr == "-" {
+		return nil
+	}
+	listener, err := net.Listen("tcp", addr)
+	if err != nil {
+		log.Printf("本地控制端口 %s 不可用，跳过: %v", addr, err)
+		return nil
+	}
+	server := &http.Server{Handler: guardLocal(handler), ReadHeaderTimeout: 5 * time.Second}
+	go func() {
+		if err := server.Serve(listener); err != nil && err != http.ErrServerClosed {
+			log.Printf("本地控制端口服务结束: %v", err)
+		}
+	}()
+	log.Printf("本地控制端口: http://%s/api/", listener.Addr())
+	return server
+}
+
+// localClientHeader 是控制端口的跨站防护。浏览器向 127.0.0.1 发的跨源请求一旦
+// 带上自定义头就会先走预检，而这里不提供任何 CORS 许可，恶意网页因此调不动
+// 本地 API（尤其是能在 Google 会话里执行脚本的 /api/eval）。
+const localClientHeader = "X-GTasks-Client"
+
+func guardLocal(handler http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get(localClientHeader) != "1" {
+			http.Error(w, "本地控制端口需要 "+localClientHeader+": 1 头", http.StatusForbidden)
+			return
+		}
+		handler.ServeHTTP(w, r)
+	})
 }
 
 // loadRegistry reads the persisted rpcid registry, falling back to the bundled

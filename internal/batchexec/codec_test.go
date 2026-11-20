@@ -123,6 +123,63 @@ func TestDecodeChunkedResponse(t *testing.T) {
 	}
 }
 
+// TestDecodeRealChunkedBody 用抓包得到的真实响应做回归：rt=c 会把载荷切成多个
+// 带长度前缀的数据块，旧实现只读第一块，且服务级错误帧藏在第 5 槽。
+func TestDecodeRealChunkedBody(t *testing.T) {
+	body := ")]}'\n\n193\n" +
+		`[["wrb.fr","SOV0tb",null,null,null,[13,null,[["type.googleapis.com/google.internal.tasks.v1.ErrorInfo",[null,null,null,null,null,1]]]],"1"],` +
+		`["di",44],["af.httprm",44,"5778740775962784027",1]]` +
+		"\n25\n" +
+		`[["e",4,null,null,229]]` +
+		"\n"
+
+	responses, err := Decode(body)
+	if err != nil {
+		t.Fatalf("Decode: %v", err)
+	}
+	if len(responses) != 1 {
+		t.Fatalf("expected a single wrb.fr frame, got %d: %+v", len(responses), responses)
+	}
+	only := responses[0]
+	if only.RpcID != "SOV0tb" {
+		t.Fatalf("unexpected rpcid: %q", only.RpcID)
+	}
+	if only.Index != 1 {
+		t.Fatalf("序列号应支持数字字符串，得到 %d", only.Index)
+	}
+	if !strings.Contains(string(only.Error), "ErrorInfo") {
+		t.Fatalf("结构化错误帧应被保留: %s", only.Error)
+	}
+	if len(only.Data) != 0 {
+		t.Fatalf("出错调用不应带 data: %s", only.Data)
+	}
+}
+
+// TestDecodeCollectsEveryChunk 覆盖成功载荷与后续数据块同时存在的情况。
+func TestDecodeCollectsEveryChunk(t *testing.T) {
+	body := ")]}'\n\n60\n" +
+		`[["wrb.fr","AbCdE","[\"ok\"]",null,null,null,"generic"]]` +
+		"\n58\n" +
+		`[["wrb.fr","FgHiJ","[\"second\"]",null,null,null,"generic"]]` +
+		"\n25\n" +
+		`[["e",4,null,null,143]]` +
+		"\n"
+
+	responses, err := Decode(body)
+	if err != nil {
+		t.Fatalf("Decode: %v", err)
+	}
+	if len(responses) != 2 {
+		t.Fatalf("expected both chunks to be decoded, got %+v", responses)
+	}
+	if responses[0].RpcID != "AbCdE" || responses[1].RpcID != "FgHiJ" {
+		t.Fatalf("unexpected order: %+v", responses)
+	}
+	if responses[1].Raw != `["second"]` {
+		t.Fatalf("unexpected payload: %s", responses[1].Raw)
+	}
+}
+
 func TestDecodeRejectsNonBatchExecuteBody(t *testing.T) {
 	for _, body := range []string{"", "   ", "<html>login redirect</html>", ")]}'"} {
 		if _, err := Decode(body); err == nil {

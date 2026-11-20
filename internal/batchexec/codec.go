@@ -60,14 +60,9 @@ func Encode(calls []Call) (string, error) {
 // Decode parses a batchexecute response body into per-RPC results. Non-RPC
 // frames such as "di", "af.httprm" and "e" are skipped.
 func Decode(body string) ([]Response, error) {
-	payload, err := stripEnvelope(body)
+	frames, err := splitFrames(body)
 	if err != nil {
 		return nil, err
-	}
-
-	var frames [][]json.RawMessage
-	if err := json.Unmarshal([]byte(payload), &frames); err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrMalformedResponse, err)
 	}
 
 	results := make([]Response, 0, len(frames))
@@ -89,8 +84,12 @@ func Decode(body string) ([]Response, error) {
 		if index, err := decodeIndex(frame[len(frame)-1]); err == nil {
 			result.Index = index
 		}
-		if len(frame) > 3 && len(frame[3]) > 0 && string(frame[3]) != "null" {
-			result.Error = frame[3]
+		// Google keeps the error payload in different slots depending on how
+		// the call failed: a JSON string for transport-level refusals, a
+		// structured array for service errors. The trailing slot is the
+		// sequence marker, so it is left out of the search.
+		if err := errorSlot(frame[3 : len(frame)-1]); err != nil {
+			result.Error = err
 		}
 
 		// frame[2] is a JSON string holding the real payload.
@@ -109,31 +108,93 @@ func Decode(body string) ([]Response, error) {
 	return results, nil
 }
 
-// stripEnvelope removes the )]}' guard and any chunk-length framing.
-func stripEnvelope(body string) (string, error) {
-	current := strings.TrimSpace(body)
-	for current != "" {
-		if strings.HasPrefix(current, ")]}'") {
-			newline := strings.IndexByte(current, '\n')
-			if newline < 0 {
-				return "", ErrMalformedResponse
+// envelopeGuard is the XSSI prefix every batchexecute body starts with.
+const envelopeGuard = ")]}'"
+
+// splitFrames walks a response body and returns every frame it carries. With
+// rt=c Google frames the payload as a guard line followed by length-prefixed
+// chunks, and a single response routinely holds more than one chunk, so all of
+// them are collected instead of only the first.
+func splitFrames(body string) ([][]json.RawMessage, error) {
+	var frames [][]json.RawMessage
+	chunks := 0
+
+	rest := body
+	for {
+		rest = strings.TrimLeft(rest, " \t\r\n")
+		if rest == "" {
+			break
+		}
+		if strings.HasPrefix(rest, envelopeGuard) {
+			rest = rest[len(envelopeGuard):]
+			continue
+		}
+		if rest[0] != '[' {
+			marker, remainder := splitLine(rest)
+			if !isChunkLength(marker) {
+				return nil, fmt.Errorf("%w: 响应以 %q 开头", ErrMalformedResponse, truncate(strings.TrimSpace(rest), 64))
 			}
-			current = strings.TrimSpace(current[newline+1:])
+			rest = remainder
 			continue
 		}
-		if current[0] == '[' {
-			return current, nil
+		chunk, consumed, err := decodeChunk(rest)
+		if err != nil {
+			return nil, err
 		}
-		newline := strings.IndexByte(current, '\n')
-		if newline > 0 && isChunkLength(strings.TrimSpace(current[:newline])) {
-			current = strings.TrimSpace(current[newline+1:])
-			continue
-		}
-		return "", fmt.Errorf("%w: 响应以 %q 开头", ErrMalformedResponse, truncate(current, 64))
+		frames = append(frames, chunk...)
+		chunks++
+		rest = rest[consumed:]
 	}
-	return "", ErrMalformedResponse
+
+	if chunks == 0 {
+		return nil, ErrMalformedResponse
+	}
+	return frames, nil
 }
 
+// decodeChunk reads the single JSON value at the start of text and reports how
+// many bytes it occupied, so the caller can continue with the next chunk.
+func decodeChunk(text string) ([][]json.RawMessage, int, error) {
+	decoder := json.NewDecoder(strings.NewReader(text))
+	var value json.RawMessage
+	if err := decoder.Decode(&value); err != nil {
+		return nil, 0, fmt.Errorf("%w: %v", ErrMalformedResponse, err)
+	}
+	frames, err := asFrames(value)
+	if err != nil {
+		return nil, 0, err
+	}
+	return frames, int(decoder.InputOffset()), nil
+}
+
+// asFrames accepts both the usual list of frames and a single bare frame, so an
+// unexpected wrapper does not throw the payload away.
+func asFrames(value json.RawMessage) ([][]json.RawMessage, error) {
+	var frames [][]json.RawMessage
+	if err := json.Unmarshal(value, &frames); err == nil {
+		return frames, nil
+	}
+	var frame []json.RawMessage
+	if err := json.Unmarshal(value, &frame); err != nil {
+		return nil, fmt.Errorf("%w: 数据块不是帧数组", ErrMalformedResponse)
+	}
+	return [][]json.RawMessage{frame}, nil
+}
+
+// errorSlot returns the first populated error slot, or nil when the call
+// carried no error.
+func errorSlot(slots []json.RawMessage) json.RawMessage {
+	for _, slot := range slots {
+		if len(slot) == 0 || string(slot) == "null" {
+			continue
+		}
+		return slot
+	}
+	return nil
+}
+
+// isChunkLength reports whether candidate looks like a chunk-length marker.
+// Google writes them in decimal, but hex has been observed too, so both count.
 func isChunkLength(candidate string) bool {
 	if candidate == "" || len(candidate) > 10 {
 		return false
@@ -146,12 +207,25 @@ func isChunkLength(candidate string) bool {
 	return true
 }
 
+func splitLine(text string) (line, remainder string) {
+	if newline := strings.IndexByte(text, '\n'); newline >= 0 {
+		return strings.TrimSpace(text[:newline]), text[newline+1:]
+	}
+	return strings.TrimSpace(text), ""
+}
+
+// decodeIndex reads the trailing sequence slot, which Google sends either as a
+// number or as a numeric string.
 func decodeIndex(raw json.RawMessage) (int, error) {
 	var value int
-	if err := json.Unmarshal(raw, &value); err != nil {
+	if err := json.Unmarshal(raw, &value); err == nil {
+		return value, nil
+	}
+	var text string
+	if err := json.Unmarshal(raw, &text); err != nil {
 		return 0, err
 	}
-	return value, nil
+	return strconv.Atoi(text)
 }
 
 func truncate(text string, limit int) string {

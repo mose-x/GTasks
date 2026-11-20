@@ -9,7 +9,14 @@ import (
 	"testing"
 )
 
-func TestDefaultCatalogueIsCompleteButUndiscovered(t *testing.T) {
+// discovered lists the operations the bundled catalogue already carries an
+// rpcid for. Everything else must still be pending, so a build that silently
+// loses a mapping fails here rather than in the field.
+var discovered = map[Operation]string{
+	OpSnapshot: "Yz8iP",
+}
+
+func TestDefaultCatalogueCarriesOnlyDiscoveredSteps(t *testing.T) {
 	registry, err := Default()
 	if err != nil {
 		t.Fatalf("Default: %v", err)
@@ -20,15 +27,19 @@ func TestDefaultCatalogueIsCompleteButUndiscovered(t *testing.T) {
 		t.Fatalf("内置操作表应覆盖 20+ 个操作，实到 %d", len(all))
 	}
 	for _, definition := range all {
-		if definition.Ready() {
-			t.Fatalf("内置操作 %s 不应带 steps", definition.Op)
-		}
 		if definition.Label == "" || definition.Notes == "" {
 			t.Fatalf("操作 %s 缺少 label 或 notes", definition.Op)
 		}
+		rpcID, shouldBeReady := discovered[definition.Op]
+		if shouldBeReady != definition.Ready() {
+			t.Fatalf("操作 %s 的就绪状态不符：期望 ready=%v，实到 %v", definition.Op, shouldBeReady, definition.Ready())
+		}
+		if shouldBeReady && definition.Steps[0].RpcID != rpcID {
+			t.Fatalf("操作 %s 的 rpcid = %q, 期望 %q", definition.Op, definition.Steps[0].RpcID, rpcID)
+		}
 	}
-	if got := len(registry.Pending()); got != len(all) {
-		t.Fatalf("所有操作都应待发现，实到 %d/%d", got, len(all))
+	if got, want := len(registry.Pending()), len(all)-len(discovered); got != want {
+		t.Fatalf("待发现操作数 = %d, 期望 %d", got, want)
 	}
 
 	// The operations the official API cannot express must be in the catalogue.
@@ -36,6 +47,50 @@ func TestDefaultCatalogueIsCompleteButUndiscovered(t *testing.T) {
 		if _, ok := registry.Lookup(required); !ok {
 			t.Fatalf("内置操作表缺少 %s", required)
 		}
+	}
+}
+
+// A persisted operations.json written by an older build must still pick up
+// rpcids discovered since, otherwise git-distributed users keep a stale table
+// forever.
+func TestLoadFromAbsorbsNewSeedOperations(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "operations.json")
+	stale := `{"version":1,"operations":[
+		{"op":"createTask","label":"新建任务","steps":[{"rpcid":"OldRpc"}],"notes":"用户自己抓的"},
+		{"op":"listTasks","label":"列出清单内的任务","steps":[],"notes":"旧版本"}
+	]}`
+	if err := os.WriteFile(path, []byte(stale), 0o600); err != nil {
+		t.Fatalf("写入旧操作表: %v", err)
+	}
+
+	registry, err := LoadFrom(path)
+	if err != nil {
+		t.Fatalf("LoadFrom: %v", err)
+	}
+
+	snapshot, ok := registry.Lookup(OpSnapshot)
+	if !ok || !snapshot.Ready() {
+		t.Fatalf("旧操作表应补上 %s，实到 ok=%v def=%+v", OpSnapshot, ok, snapshot)
+	}
+	if snapshot.Steps[0].RpcID != "Yz8iP" {
+		t.Fatalf("补上的 rpcid = %q, 期望 Yz8iP", snapshot.Steps[0].RpcID)
+	}
+
+	// The user's own mapping wins over the seed, and catalogue order is kept.
+	userDefined, _ := registry.Lookup("createTask")
+	if len(userDefined.Steps) != 1 || userDefined.Steps[0].RpcID != "OldRpc" {
+		t.Fatalf("用户已抓的 createTask 被覆盖: %+v", userDefined.Steps)
+	}
+	order := registry.All()
+	if order[0].Op != OpSnapshot {
+		t.Fatalf("目录顺序应按内置表排列，首个为 %q, 期望 %q", order[0].Op, OpSnapshot)
+	}
+	last := order[len(order)-1].Op
+	if last != "searchTasks" {
+		t.Fatalf("未在内置表里的操作应排在末尾，实到 %q", last)
+	}
+	if len(order) != 23 {
+		t.Fatalf("合并后操作数 = %d, 期望 23", len(order))
 	}
 }
 
@@ -68,8 +123,8 @@ func TestAssignPersistAndReload(t *testing.T) {
 	if !strings.Contains(definition.Notes, "2026-11-19") {
 		t.Fatalf("notes 未保留: %q", definition.Notes)
 	}
-	if got := len(reloaded.Pending()); got != len(reloaded.All())-1 {
-		t.Fatalf("pending 数量不正确: %d", got)
+	if got, want := len(reloaded.Pending()), len(reloaded.All())-1-len(discovered); got != want {
+		t.Fatalf("pending 数量 = %d, 期望 %d", got, want)
 	}
 }
 
