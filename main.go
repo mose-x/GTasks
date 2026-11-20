@@ -28,6 +28,7 @@ import (
 	"gtasks/internal/theme"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
+	"github.com/wailsapp/wails/v3/pkg/events"
 )
 
 //go:embed all:frontend
@@ -43,6 +44,11 @@ const (
 	googleTasksURL    = "https://tasks.google.com/"
 	captureRingLimit  = 3000
 	contextMenuID     = "gtasks-context"
+	themeMenuID       = "gtasks-theme"
+
+	// 窗口标题统一用产品名，不再暴露「Google 会话」这类内部叫法。
+	windowTitle          = "GTasks"
+	workbenchWindowTitle = "GTasks 工作台"
 )
 
 func main() {
@@ -116,7 +122,7 @@ func main() {
 
 	mainWindow := app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Name:      mainWindowName,
-		Title:     "Google Tasks",
+		Title:     windowTitle,
 		URL:       "/",
 		Width:     1180,
 		Height:    780,
@@ -124,24 +130,9 @@ func main() {
 		MinHeight: 540,
 	})
 
-	workbenchWindow := app.Window.NewWithOptions(application.WebviewWindowOptions{
-		Name:      workbenchName,
-		Title:     "GTasks 逆向工作台",
-		URL:       "/workbench.html",
-		Width:     1240,
-		Height:    820,
-		MinWidth:  900,
-		MinHeight: 560,
-		Mac: application.MacWindow{
-			// 工作台是逆向工具，固定深色；不跟全局主题走，避免浅色模式下
-			// 标题栏和内容区一个白一个黑。
-			Appearance: application.NSAppearanceNameDarkAqua,
-		},
-	})
-
 	sessionOptions := application.WebviewWindowOptions{
 		Name:  sessionWindowName,
-		Title: "Google 会话（登录 / RPC 通道）",
+		Title: windowTitle,
 		URL:   googleTasksURL,
 		// Wide enough for tasks.google.com to use its desktop layout. At phone
 		// widths Google switches the 所有任务 view to horizontally paged list
@@ -165,13 +156,67 @@ func main() {
 	sessionBridge.Bind(sessionWindow)
 	apiHandler.BindWindows(mainWindow, sessionWindow)
 
+	// 窗口表：右键菜单靠 ContextMenuData 里的窗口名找回目标窗口，主题广播也按
+	// 名字取窗口。工作台被用户关掉后 Wails 会直接销毁它，所以表里的值允许为
+	// nil，取窗口一律走 lookupWindow。
+	var windowsMu sync.Mutex
 	windowsByName := map[string]*application.WebviewWindow{
 		mainWindowName:    mainWindow,
-		workbenchName:     workbenchWindow,
 		sessionWindowName: sessionWindow,
 	}
-	newContextMenu(func(name string) *application.WebviewWindow {
+	lookupWindow := func(name string) *application.WebviewWindow {
+		windowsMu.Lock()
+		defer windowsMu.Unlock()
 		return windowsByName[name]
+	}
+	storeWindow := func(name string, win *application.WebviewWindow) {
+		windowsMu.Lock()
+		defer windowsMu.Unlock()
+		windowsByName[name] = win
+	}
+
+	// 工作台窗口一关就销毁，之后 Show() 全是空操作（用户反馈的「点工作台菜单
+	// 没反应」就是这个）。改成按需重建，菜单项任何时候都能拉起一个可用窗口。
+	newWorkbenchWindow := func() *application.WebviewWindow {
+		win := app.Window.NewWithOptions(application.WebviewWindowOptions{
+			Name:      workbenchName,
+			Title:     workbenchWindowTitle,
+			URL:       "/workbench.html",
+			Width:     1240,
+			Height:    820,
+			MinWidth:  900,
+			MinHeight: 560,
+			Mac: application.MacWindow{
+				// 工作台是逆向工具，固定深色；不跟全局主题走，避免浅色模式下
+				// 标题栏和内容区一个白一个黑。
+				Appearance: application.NSAppearanceNameDarkAqua,
+			},
+		})
+		storeWindow(workbenchName, win)
+		win.OnWindowEvent(events.Common.WindowClosing, func(*application.WindowEvent) {
+			storeWindow(workbenchName, nil)
+		})
+		return win
+	}
+	newWorkbenchWindow()
+
+	var workbenchMu sync.Mutex
+	openWorkbench := func() {
+		workbenchMu.Lock()
+		defer workbenchMu.Unlock()
+		win := lookupWindow(workbenchName)
+		if win == nil {
+			win = newWorkbenchWindow()
+		}
+		win.Show()
+		win.Focus()
+	}
+
+	newContextMenu(lookupWindow)
+
+	themePicker := newThemeMenu(func(mode theme.Mode) { themeManager.Set(mode) })
+	apiHandler.SetThemeMenuOpener(func(x, y int) {
+		themePicker.open(lookupWindow(mainWindowName), mainWindowName, themeManager.Mode(), x, y)
 	})
 
 	// 主题切换后把模式推给三个窗口：主窗口和工作台改自己的 data-theme，
@@ -182,7 +227,9 @@ func main() {
 	themeManager.OnChange(func(mode theme.Mode) {
 		script := fmt.Sprintf("window.__gtasksTheme&&window.__gtasksTheme(%q);", string(mode))
 		mainWindow.ExecJS(script)
-		workbenchWindow.ExecJS(script)
+		if workbench := lookupWindow(workbenchName); workbench != nil {
+			workbench.ExecJS(script)
+		}
 		sessionWindow.ExecJS(fmt.Sprintf("window.__gtask&&window.__gtask.setThemeMode(%q);", string(mode)))
 
 		// 标题栏跟内容一起变；工作台固定深色，不参与。
@@ -205,19 +252,12 @@ func main() {
 	sessionBridge.SetCommandHandler(func(name string, args map[string]any) {
 		switch name {
 		case "openWorkbench":
-			workbenchWindow.Show()
-			workbenchWindow.Focus()
-		case "setTheme":
-			mode, _ := args["mode"].(string)
-			themeManager.Set(theme.Parse(mode))
+			openWorkbench()
+		case "openThemeMenu":
+			x, y := commandPoint(args)
+			themePicker.open(sessionWindow, sessionWindowName, themeManager.Mode(), x, y)
 		case "contextMenu":
-			x, y := 0, 0
-			if value, ok := args["x"].(float64); ok {
-				x = int(value)
-			}
-			if value, ok := args["y"].(float64); ok {
-				y = int(value)
-			}
+			x, y := commandPoint(args)
 			sessionWindow.OpenContextMenu(&application.ContextMenuData{
 				Id:   contextMenuID,
 				X:    x,
@@ -343,6 +383,62 @@ func newContextMenu(resolve func(string) *application.WebviewWindow) *applicatio
 		}
 	})
 	return menu
+}
+
+// commandPoint 取出页面回调携带的 webview 坐标：CSS 像素、原点左上角，
+// 与 NSMenu 的 popUpMenuPositioningItem:atLocation:inView: 用的是同一套。
+func commandPoint(args map[string]any) (int, int) {
+	x, y := 0, 0
+	if value, ok := args["x"].(float64); ok {
+		x = int(value)
+	}
+	if value, ok := args["y"].(float64); ok {
+		y = int(value)
+	}
+	return x, y
+}
+
+// themeMenuLabels 是主题菜单里三档的显示名，与会话页注入按钮的文案保持一致。
+var themeMenuLabels = map[theme.Mode]string{
+	theme.Light:  "明亮",
+	theme.Dark:   "暗黑",
+	theme.System: "跟随系统",
+}
+
+// themeMenu 是「明亮 / 暗黑 / 跟随系统」单选菜单。会话页顶栏的主题按钮与主窗口
+// 的主题按钮共用同一份，两处弹出来的东西完全一致。
+type themeMenu struct {
+	menu  *application.ContextMenu
+	items map[theme.Mode]*application.MenuItem
+}
+
+func newThemeMenu(apply func(theme.Mode)) *themeMenu {
+	menu := application.NewContextMenu(themeMenuID)
+	result := &themeMenu{menu: menu, items: make(map[theme.Mode]*application.MenuItem, 3)}
+	for _, mode := range []theme.Mode{theme.Light, theme.Dark, theme.System} {
+		target := mode
+		result.items[mode] = menu.AddRadio(themeMenuLabels[mode], false).
+			OnClick(func(*application.Context) { apply(target) })
+	}
+	return result
+}
+
+// open 先把勾选同步成当前模式，再在 (x, y) 处弹出菜单。
+func (t *themeMenu) open(win *application.WebviewWindow, windowName string, mode theme.Mode, x, y int) {
+	if win == nil {
+		return
+	}
+	// 单选组的联动依赖 Menu.Update 里的 processRadioGroups，而菜单是在应用
+	// Run 之前建的，那一步没跑到，所以三项的勾选状态每次都由这里显式刷。
+	for itemMode, item := range t.items {
+		item.SetChecked(itemMode == mode)
+	}
+	win.OpenContextMenu(&application.ContextMenuData{
+		Id:   themeMenuID,
+		X:    x,
+		Y:    y,
+		Data: windowName,
+	})
 }
 
 // themePath 是全局外观模式的持久化位置。

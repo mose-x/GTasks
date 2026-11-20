@@ -34,7 +34,7 @@ function renderThemeButton() {
   if (!button) return;
   const mode = themeMode();
   button.innerHTML = ICON[THEME_ICON[mode]] || ICON.themeAuto;
-  button.title = `主题：${THEME_LABEL[mode]}（点击切换）`;
+  button.title = `主题：${THEME_LABEL[mode]}`;
   button.classList.toggle("on", mode === "dark");
 }
 
@@ -862,14 +862,12 @@ function renderAll() {
 
 function bindUI() {
   $("btnDemo").addEventListener("click", () => toggleDemo());
-  $("btnTheme").addEventListener("click", () => {
-    const mode = nextThemeMode();
-    renderThemeButton();
-    setServerTheme(mode)
-      .then(() => toast(`主题：${THEME_LABEL[mode]}`))
-      .catch((error) => toast(`主题切换失败：${error.message}`, true));
+  $("btnTheme").addEventListener("click", (event) => {
+    openThemeMenu(event.currentTarget).catch((error) =>
+      toast(`主题菜单打开失败：${error.message}`, true),
+    );
   });
-  // 会话页面的主题按钮切档时，Go 会广播到本窗口。
+  // 菜单里选完由 Go 落盘并广播回来，这里只需跟着刷新图标。
   document.addEventListener("gtasks-theme", () => renderThemeButton());
   $("btnCloseDetail").addEventListener("click", closeDetail);
   $("btnDeleteTask").addEventListener("click", () => deleteTask());

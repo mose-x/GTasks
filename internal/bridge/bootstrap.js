@@ -661,9 +661,10 @@
   // 会话窗口就是用户每天真正在用的 tasks.google.com 界面，这里做几处桌面化
   // 改造。全部走「注入 DOM + 回调 Go」的路线，不替换 Google 自己的逻辑：
   //   1. 顶栏去掉「Google 应用」九宫格（纯 CSS，见 installUIStyles）；
-  //   2. 顶栏「支持」按钮左边加主题按钮，明亮 / 暗黑 / 跟随系统三档循环；
+  //   2. 顶栏「支持」按钮右边加主题按钮，弹原生的明亮 / 暗黑 / 跟随系统单选菜单；
   //   3. 「支持」菜单末尾追加「GTasks 工作台」一项；
-  //   4. 侧栏每个任务列表行加「列表选项」入口，点的还是 Google 自己的菜单；
+  //   4. 侧栏每个任务列表行加「列表选项」入口，点的还是 Google 自己的菜单，
+  //      但菜单会被挪到 ⋮ 正下方，且不会顺带把清单切走；
   //   5. 右键统一交给 Go 弹原生菜单（WebKit 默认菜单带前进/后退，用不上）。
   //
   // 测试沙箱里的 document 只有几个字段，没有 DOM API，整段自动跳过。
@@ -679,6 +680,10 @@
   var SUPPORT_MENU_SELECTOR = 'ul[role="menu"][aria-label*="支持"], ul[role="menu"][aria-label*="Support"]';
   var LIST_ROW_SELECTOR = "li[data-task-list-id]";
   var LIST_OPTIONS_SELECTOR = '[aria-label="列表选项"], [aria-label="List options"]';
+  // Google 的浮层菜单是 div[role=menu]（侧栏里那些常驻的 ul[role=menu] 不算）。
+  var POPUP_MENU_SELECTOR = 'div[role="menu"]';
+  // 侧栏行自己是可点的，⋮ 上这些事件都得就地吃掉，不能漏给行。
+  var ROW_MENU_EVENTS = ["pointerdown", "mousedown", "pointerup", "mouseup", "click", "dblclick", "auxclick"];
 
   function uiAvailable() {
     return typeof document !== "undefined" &&
@@ -720,7 +725,7 @@
     if (!button) return;
     var mode = themeModeNow();
     button.innerHTML = UI_THEME_ICON[mode] || UI_THEME_ICON.system;
-    button.title = UI_THEME_TITLE[mode] + "（点击切换）";
+    button.title = UI_THEME_TITLE[mode];
     button.setAttribute("aria-label", UI_THEME_TITLE[mode]);
   }
 
@@ -736,13 +741,15 @@
       button.addEventListener("click", function (event) {
         event.stopPropagation();
         event.preventDefault();
-        var next = UI_MODES[(UI_MODES.indexOf(themeModeNow()) + 1) % UI_MODES.length];
-        uiCommand("setTheme", { mode: next });
+        // 三档选择交给 Go 弹原生单选菜单，位置贴着这颗按钮的下沿。
+        var rect = button.getBoundingClientRect();
+        uiCommand("openThemeMenu", { x: Math.round(rect.left), y: Math.round(rect.bottom + 4) });
       });
       button.addEventListener("keydown", function (event) {
         if (event.key === "Enter" || event.key === " ") button.click();
       });
-      support.parentElement.insertBefore(button, support);
+      // 问号在前、主题在后。
+      support.parentElement.insertBefore(button, support.nextSibling);
     }
     renderThemeButton();
   }
@@ -794,10 +801,85 @@
     return null;
   }
 
-  function openListOptions(listId) {
+  function visiblePopMenus() {
+    var found = [];
+    var menus = document.querySelectorAll(POPUP_MENU_SELECTOR);
+    for (var index = 0; index < menus.length; index++) {
+      var rect = menus[index].getBoundingClientRect();
+      if (rect.width > 0 && rect.height > 0 && getComputedStyle(menus[index]).visibility !== "hidden") {
+        found.push(menus[index]);
+      }
+    }
+    return found;
+  }
+
+  // 菜单打开后把它挪到 ⋮ 正下方：Google 的「列表选项」按钮长在内容区顶部，
+  // 不挪的话菜单会弹到离鼠标很远的地方。
+  function anchorMenu(menu, anchor) {
+    var apply = function () {
+      var parent = menu.offsetParent || document.body;
+      var parentRect = parent.getBoundingClientRect();
+      var width = menu.offsetWidth;
+      var height = menu.offsetHeight;
+      var top = anchor.bottom + 4;
+      if (top + height > window.innerHeight - 8) {
+        var above = anchor.top - height - 4;
+        top = above >= 8 ? above : Math.max(8, window.innerHeight - height - 8);
+      }
+      var available = window.innerHeight - top - 8;
+      if (height > available) menu.style.maxHeight = Math.max(120, available) + "px";
+      var left = Math.min(Math.max(8, anchor.right - width), Math.max(8, window.innerWidth - width - 8));
+      menu.style.left = Math.round(left - parentRect.left) + "px";
+      menu.style.top = Math.round(top - parentRect.top) + "px";
+    };
+    apply();
+    // Google 的浮层有 ~300ms 的展开动画，期间 offsetWidth 还在变、定位会被它
+    // 自己的动画盖掉，所以要连着覆盖到动画结束；45 帧之后放手，免得和它自己
+    // 的滚动跟随一直打架。
+    var frames = 0;
+    var tick = function () {
+      frames += 1;
+      if (!menu.isConnected || frames > 45 || !window.requestAnimationFrame) return;
+      apply();
+      window.requestAnimationFrame(tick);
+    };
+    if (window.requestAnimationFrame) window.requestAnimationFrame(tick);
+  }
+
+  // 轮询等新弹出来的那个浮层（点击前已经可见的要排除掉）。
+  function moveMenuTo(previous, anchor) {
+    if (!anchor) return;
+    var tries = 0;
+    var timer = setInterval(function () {
+      tries += 1;
+      var menus = visiblePopMenus();
+      var fresh = null;
+      for (var index = 0; index < menus.length; index++) {
+        if (previous.indexOf(menus[index]) < 0) {
+          fresh = menus[index];
+          break;
+        }
+      }
+      if (!fresh && menus.length === 1) fresh = menus[0];
+      if (fresh) {
+        clearInterval(timer);
+        anchorMenu(fresh, anchor);
+      } else if (tries > 25) {
+        clearInterval(timer);
+      }
+    }, 16);
+  }
+
+  function clickListOptions(target, anchor) {
+    var previous = visiblePopMenus();
+    target.click();
+    moveMenuTo(previous, anchor);
+  }
+
+  function openListOptions(listId, anchor) {
     var button = listOptionsButton(listId);
     if (button) {
-      button.click();
+      clickListOptions(button, anchor);
       return;
     }
     var row = document.querySelector(LIST_ROW_SELECTOR + '[data-task-list-id="' + listId + '"]');
@@ -811,11 +893,20 @@
       var target = listOptionsButton(listId);
       if (target) {
         clearInterval(timer);
-        target.click();
+        clickListOptions(target, anchor);
       } else if (tries > 25) {
         clearInterval(timer);
       }
     }, 80);
+  }
+
+  // ⋮ 上的鼠标事件必须就地吃掉：Google 的 jsaction 冒泡到根节点再分发，
+  // 漏掉任何一层都会把「点列表选项」变成「顺手切清单」。mousedown 上另外
+  // preventDefault，只是不让焦点跑到 ⋮ 上，WebKit/Blink 里 click 照样派发
+  // （pointerdown 上这么做才会把后续鼠标事件一起吃掉）。
+  function swallowRowEvent(event) {
+    event.stopPropagation();
+    if (event.type === "mousedown") event.preventDefault();
   }
 
   function decorateRow(row) {
@@ -827,10 +918,12 @@
     button.setAttribute("tabindex", "-1");
     button.title = "列表选项";
     button.innerHTML = UI_MORE_ICON;
+    for (var index = 0; index < ROW_MENU_EVENTS.length; index++) {
+      button.addEventListener(ROW_MENU_EVENTS[index], swallowRowEvent);
+    }
     button.addEventListener("click", function (event) {
-      event.stopPropagation();
       event.preventDefault();
-      openListOptions(row.getAttribute("data-task-list-id"));
+      openListOptions(row.getAttribute("data-task-list-id"), button.getBoundingClientRect());
     });
     row.appendChild(button);
   }

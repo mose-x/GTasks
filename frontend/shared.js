@@ -60,7 +60,7 @@ function ensureToast() {
 
 const THEME_KEY = "gtasks-theme";
 const THEME_MODES = ["light", "dark", "system"];
-const THEME_LABEL = { light: "浅色", dark: "深色", system: "跟随系统" };
+const THEME_LABEL = { light: "明亮", dark: "暗黑", system: "跟随系统" };
 
 // Go 侧是主题的唯一事实来源：它同时切换 macOS 原生外观（标题栏与所有
 // webview 的 prefers-color-scheme 一起变）。localStorage 只作首屏缓存，
@@ -96,8 +96,14 @@ function rememberTheme(mode) {
   return applyTheme(serverThemeMode);
 }
 
-function nextThemeMode() {
-  return THEME_MODES[(THEME_MODES.indexOf(themeMode()) + 1) % THEME_MODES.length];
+// 主题菜单是 Go 弹的原生单选菜单，前端只负责把按钮位置报上去，
+// 这样主窗口和会话页顶栏那颗按钮弹出来的东西完全一致。
+async function openThemeMenu(button) {
+  const rect = button.getBoundingClientRect();
+  await api("/api/theme/menu", {
+    method: "POST",
+    body: { x: Math.round(rect.left), y: Math.round(rect.bottom + 4) },
+  });
 }
 
 // 拉一次服务端主题；失败就退回本地缓存，界面不至于没配色。
@@ -109,13 +115,6 @@ async function loadServerTheme() {
     applyTheme(themeMode());
   }
   return themeMode();
-}
-
-// 切换主题：先本地生效，再通知 Go；Go 广播回来时各窗口自动对齐。
-async function setServerTheme(mode) {
-  rememberTheme(mode);
-  await api("/api/theme", { method: "POST", body: { mode } });
-  return mode;
 }
 
 // Go 切换原生外观后往每个窗口推这个函数。

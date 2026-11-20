@@ -1,7 +1,9 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" fill="none" viewBox="0 0 1024 1024">
-  <!-- Google Tasks 产品标识（源自 gstatic 官方 tasks_2026 SVG），按 Apple 图标网格
-       缩放到 824x824 并居中，画布其余部分保持透明。 -->
-  <g transform="translate(100 100) scale(4.2916667)">
+  <!-- Google Tasks 产品标识（源自 gstatic 官方 tasks_2026 SVG）。原图 192 视框里的
+       有效画面是 x 10..182 / y 14..182（中心 96,98），这里放大 5 倍并把中心对到
+       512,512，成品占画布约 84%——和 Google 自己的 macOS 应用（Chrome 实测 83.8%）
+       一致，比 Apple 图标网格的 824/1024 略大，程序坞里才不会显得偏小。 -->
+  <g transform="translate(32 22) scale(5)">
     <g clip-path="url(#gt-a)">
       <rect width="152" height="130" x="20" y="52" fill="#bbe2ff" rx="65"/>
       <rect width="172" height="152" x="10" y="14" fill="#3186ff" rx="74"/>

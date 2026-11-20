@@ -226,7 +226,12 @@ type Handler struct {
 	mu         sync.RWMutex
 	mainWin    *application.WebviewWindow
 	sessionWin *application.WebviewWindow
+	themeMenu  ThemeMenuOpener
 }
+
+// ThemeMenuOpener 在调用方指定的 webview 坐标处弹出主题单选菜单。由 main 注入，
+// 这样前端按钮点下去弹的是原生菜单，和会话页顶栏那颗按钮行为一致。
+type ThemeMenuOpener func(x, y int)
 
 // Deps bundles the Handler's collaborators.
 type Deps struct {
@@ -259,6 +264,13 @@ func (h *Handler) BindWindows(mainWin, sessionWin *application.WebviewWindow) {
 	h.mu.Lock()
 	h.mainWin = mainWin
 	h.sessionWin = sessionWin
+	h.mu.Unlock()
+}
+
+// SetThemeMenuOpener 注入主题菜单的弹出实现。
+func (h *Handler) SetThemeMenuOpener(opener ThemeMenuOpener) {
+	h.mu.Lock()
+	h.themeMenu = opener
 	h.mu.Unlock()
 }
 
@@ -295,6 +307,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.handleSessionAuto(w, r)
 	case path == "/api/theme":
 		h.handleTheme(w, r)
+	case path == "/api/theme/menu" && r.Method == http.MethodPost:
+		h.handleThemeMenu(w, r)
 	case path == "/api/eval" && r.Method == http.MethodPost:
 		h.handleEval(w, r)
 	case path == "/api/initdata" && r.Method == http.MethodGet:
@@ -861,6 +875,28 @@ func (h *Handler) handleTheme(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeError(w, http.StatusMethodNotAllowed, "该接口只支持 GET / POST")
 	}
+}
+
+// handleThemeMenu 在主窗口弹出主题单选菜单。坐标由前端按钮的位置算出，
+// 传的是 webview 内的 CSS 像素。
+func (h *Handler) handleThemeMenu(w http.ResponseWriter, r *http.Request) {
+	h.mu.RLock()
+	opener := h.themeMenu
+	h.mu.RUnlock()
+	if opener == nil {
+		writeError(w, http.StatusServiceUnavailable, "主题菜单未启用")
+		return
+	}
+	var request struct {
+		X int `json:"x"`
+		Y int `json:"y"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		writeError(w, http.StatusBadRequest, "请求体不是合法 JSON")
+		return
+	}
+	opener(request.X, request.Y)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (h *Handler) handleSessionAuto(w http.ResponseWriter, r *http.Request) {
