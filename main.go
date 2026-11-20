@@ -8,12 +8,16 @@ package main
 
 import (
 	"embed"
+	"encoding/json"
+	"fmt"
 	"io/fs"
 	"log"
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"runtime"
+	"sync"
 	"time"
 
 	"gtasks/internal/api"
@@ -21,6 +25,7 @@ import (
 	"gtasks/internal/bridge"
 	"gtasks/internal/session"
 	"gtasks/internal/tasks"
+	"gtasks/internal/theme"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
@@ -28,12 +33,16 @@ import (
 //go:embed all:frontend
 var frontendAssets embed.FS
 
+//go:embed build/app-icon.png
+var appIcon []byte
+
 const (
 	mainWindowName    = "main"
 	workbenchName     = "workbench"
 	sessionWindowName = "gsession"
 	googleTasksURL    = "https://tasks.google.com/"
 	captureRingLimit  = 3000
+	contextMenuID     = "gtasks-context"
 )
 
 func main() {
@@ -59,6 +68,8 @@ func main() {
 		}
 	}
 
+	themeManager := theme.Load(themePath(dataDir))
+
 	registry := loadRegistry(dataDir)
 	client := batchexec.NewClient(sessionBridge)
 	service := tasks.NewService(registry, client)
@@ -71,6 +82,7 @@ func main() {
 		Registry: registry,
 		Service:  service,
 		Watcher:  watcher,
+		Theme:    themeManager,
 		DataDir:  dataDir,
 	})
 
@@ -83,6 +95,7 @@ func main() {
 	app := application.New(application.Options{
 		Name:        "GTasks",
 		Description: "Google Tasks 桌面客户端",
+		Icon:        appIcon,
 		Assets: application.AssetOptions{
 			Handler: buildAssetHandler(apiHandler),
 		},
@@ -111,7 +124,7 @@ func main() {
 		MinHeight: 540,
 	})
 
-	app.Window.NewWithOptions(application.WebviewWindowOptions{
+	workbenchWindow := app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Name:      workbenchName,
 		Title:     "GTasks 逆向工作台",
 		URL:       "/workbench.html",
@@ -119,6 +132,11 @@ func main() {
 		Height:    820,
 		MinWidth:  900,
 		MinHeight: 560,
+		Mac: application.MacWindow{
+			// 工作台是逆向工具，固定深色；不跟全局主题走，避免浅色模式下
+			// 标题栏和内容区一个白一个黑。
+			Appearance: application.NSAppearanceNameDarkAqua,
+		},
 	})
 
 	sessionOptions := application.WebviewWindowOptions{
@@ -146,6 +164,73 @@ func main() {
 	sessionWindow := app.Window.NewWithOptions(sessionOptions)
 	sessionBridge.Bind(sessionWindow)
 	apiHandler.BindWindows(mainWindow, sessionWindow)
+
+	windowsByName := map[string]*application.WebviewWindow{
+		mainWindowName:    mainWindow,
+		workbenchName:     workbenchWindow,
+		sessionWindowName: sessionWindow,
+	}
+	newContextMenu(func(name string) *application.WebviewWindow {
+		return windowsByName[name]
+	})
+
+	// 主题切换后把模式推给三个窗口：主窗口和工作台改自己的 data-theme，
+	// 会话页面只刷新注入的主题按钮图标（页面配色跟原生外观走）。
+	var themeMu sync.Mutex
+	lastDark := theme.EffectiveDark(themeManager.Mode())
+	firstTheme := true
+	themeManager.OnChange(func(mode theme.Mode) {
+		script := fmt.Sprintf("window.__gtasksTheme&&window.__gtasksTheme(%q);", string(mode))
+		mainWindow.ExecJS(script)
+		workbenchWindow.ExecJS(script)
+		sessionWindow.ExecJS(fmt.Sprintf("window.__gtask&&window.__gtask.setThemeMode(%q);", string(mode)))
+
+		// 标题栏跟内容一起变；工作台固定深色，不参与。
+		for _, win := range []*application.WebviewWindow{mainWindow, sessionWindow} {
+			theme.ApplyWindow(win.NativeWindow(), mode)
+		}
+
+		// Google 的页面只在加载时读 prefers-color-scheme，实际深浅变了就
+		// 重载一次会话页，否则页面会停留在旧配色。
+		dark := theme.EffectiveDark(mode)
+		themeMu.Lock()
+		changed := !firstTheme && dark != lastDark
+		lastDark, firstTheme = dark, false
+		themeMu.Unlock()
+		if changed {
+			sessionWindow.Reload()
+		}
+	})
+
+	sessionBridge.SetCommandHandler(func(name string, args map[string]any) {
+		switch name {
+		case "openWorkbench":
+			workbenchWindow.Show()
+			workbenchWindow.Focus()
+		case "setTheme":
+			mode, _ := args["mode"].(string)
+			themeManager.Set(theme.Parse(mode))
+		case "contextMenu":
+			x, y := 0, 0
+			if value, ok := args["x"].(float64); ok {
+				x = int(value)
+			}
+			if value, ok := args["y"].(float64); ok {
+				y = int(value)
+			}
+			sessionWindow.OpenContextMenu(&application.ContextMenuData{
+				Id:   contextMenuID,
+				X:    x,
+				Y:    y,
+				Data: sessionWindowName,
+			})
+		}
+	})
+
+	// 页面每次加载完都会 announce 一次，趁机把当前主题补进注入的按钮。
+	sessionBridge.SetReadyHandler(func(json.RawMessage) {
+		sessionWindow.ExecJS(fmt.Sprintf("window.__gtask&&window.__gtask.setThemeMode(%q);", string(themeManager.Mode())))
+	})
 
 	// Show the login window only while it is actually needed.
 	var lastRecover time.Time
@@ -227,6 +312,45 @@ func guardLocal(handler http.Handler) http.Handler {
 		}
 		handler.ServeHTTP(w, r)
 	})
+}
+
+// newContextMenu 注册全局右键菜单。WebKit 的默认菜单带「前进/后退」，对这个
+// 单页应用没意义，页面侧已经 preventDefault 掉并改弹这份：保留返回与重新加载，
+// 编辑类操作交给原生 role。目标窗口由 ContextMenuData 携带的窗口名决定。
+func newContextMenu(resolve func(string) *application.WebviewWindow) *application.ContextMenu {
+	menu := application.NewContextMenu(contextMenuID)
+	menu.Add("返回").OnClick(func(ctx *application.Context) {
+		if win := resolve(ctx.ContextMenuData()); win != nil {
+			win.ExecJS("if (history.length > 1) history.back();")
+		}
+	})
+	menu.Add("重新加载").OnClick(func(ctx *application.Context) {
+		if win := resolve(ctx.ContextMenuData()); win != nil {
+			win.Reload()
+		}
+	})
+	menu.AddSeparator()
+	// 编辑类操作走原生 role（作用于 webview 的第一响应者），标签与快捷键
+	// 自己给，免得系统没本地化时冒出英文。
+	menu.Add("剪切").SetRole(application.Cut).SetAccelerator("CmdOrCtrl+x")
+	menu.Add("复制").SetRole(application.Copy).SetAccelerator("CmdOrCtrl+c")
+	menu.Add("粘贴").SetRole(application.Paste).SetAccelerator("CmdOrCtrl+v")
+	menu.Add("全选").SetRole(application.SelectAll).SetAccelerator("CmdOrCtrl+a")
+	menu.AddSeparator()
+	menu.Add("检查元素").OnClick(func(ctx *application.Context) {
+		if win := resolve(ctx.ContextMenuData()); win != nil {
+			win.OpenDevTools()
+		}
+	})
+	return menu
+}
+
+// themePath 是全局外观模式的持久化位置。
+func themePath(dataDir string) string {
+	if dataDir == "" {
+		return ""
+	}
+	return filepath.Join(dataDir, "theme.txt")
 }
 
 // loadRegistry reads the persisted rpcid registry, falling back to the bundled

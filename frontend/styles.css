@@ -19,7 +19,7 @@
   --danger: #d93025;
   --danger-bg: #fce8e6;
   --on-accent: #ffffff;
-  --logo-bg: #1a73e8;
+  --logo-bg: #3186ff;
   --warning-bg: #fef7e0;
   --warning-border: #fde293;
   --warning-text: #7a5900;
@@ -76,6 +76,13 @@
   --scrollbar: #5f6368;
   --scrollbar-hover: #9aa0a6;
   --scrollbar-border: #202124;
+}
+
+/* 右键不弹 WebKit 默认菜单，改由 Go 弹原生自定义菜单（见 main.go）。
+   Wails 运行时读这两个 CSS 变量来决定弹哪个菜单、ContextMenuData 带什么。 */
+html {
+  --custom-contextmenu: gtasks-context;
+  --custom-contextmenu-data: main;
 }
 
 * { box-sizing: border-box; }

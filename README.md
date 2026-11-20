@@ -264,6 +264,28 @@ batchexecute 调用，参数是 `text/template` 模板。目前 `snapshot` 走�
 
 里面是 `operations.json`（操作映射）和 `captures.jsonl`（抓包历史，只追加）。
 
+## 桌面化改造：会话页里的注入层
+
+会话窗口就是每天真正在用的 tasks.google.com，`internal/bridge/bootstrap.js` 的 UI 层
+在它上面做了几处贴合桌面端的改动（只动 DOM 与回调 Go，不替换 Google 自己的逻辑）：
+
+- **顶栏去掉「Google 应用」九宫格**（纯 CSS 隐藏）。
+- **顶栏主题按钮**：插在「支持」按钮左边，明亮 → 暗黑 → 跟随系统三档循环。模式由 Go
+  持久化（`<数据目录>/theme.txt`），macOS 上同时切 `NSApp.appearance` 和每个窗口的
+  `appearance`，标题栏与 Google 页面的 `prefers-color-scheme` 一起变；Google 的页面只在
+  加载时读配色，所以实际深浅变化时会话页会自动重载一次。
+- **「支持」菜单末尾追加「GTasks 工作台」**：点击打开逆向工作台窗口。
+- **侧栏每个任务列表行加「⋮」**：悬停时出现，点的还是 Google 自己的「列表选项」菜单
+  （排序 / 重命名 / 删除 / 移动……）；该清单没在内容区渲染时会先切过去再点。
+- **右键换成原生自定义菜单**：返回 / 重新加载 / 剪切 / 复制 / 粘贴 / 全选 / 检查元素，
+  去掉了 WebKit 默认菜单里的「前进」。主界面与工作台走 Wails 运行时的
+  `--custom-contextmenu` CSS 变量，会话页由 bootstrap 拦截 `contextmenu` 后回调 Go。
+
+应用图标取自 Google Tasks 官方产品标识（gstatic 的 `tasks_2026` SVG，仅自用）：
+`build/macos-icon.sh` 用无头 Chrome 栅格化成 iconset 再 `iconutil` 打包，
+`build/macos-bundle.sh` 组装 `GTasks.app`（Info.plist + icns + 主程序）。
+**`CFBundleIdentifier` 固定为 `gtasks`**：WebKit 的 cookie / localStorage 按它隔离，改了要重新登录。
+
 ## 构建与运行
 
 仓库：<https://github.com/mose-x/googleTasks.git>（只做 git 分发，不提供安装包）
@@ -273,6 +295,10 @@ git clone https://github.com/mose-x/googleTasks.git
 cd googleTasks
 go mod tidy          # 国内网络可加 GOPROXY=https://goproxy.cn,direct
 go run .             # 或 go build -o gtasks . && ./gtasks
+
+# macOS 想要带图标的 .app：
+./build/macos-bundle.sh /tmp/GTasks.app
+./build/macos-icon.sh          # 仅在改 build/icon.svg 后需要，依赖本机 Chrome
 ```
 
 需要 **Go 1.26+**（Wails v3.1.0 的要求；装的是 1.25 时 toolchain 会自动下载 1.26）。
@@ -290,9 +316,10 @@ Windows 与 Linux 的**实机冒烟测试还没做**。
 启动后有三个窗口：**Google Tasks**（主界面）、**逆向工作台**、
 **Google 会话**（加载 `tasks.google.com`，未登录会自动跳到 Google 登录页）。
 
-主界面右上角侧栏里有主题按钮（太阳 / 月亮 / 自动），在浅色、深色、跟随系统之间循环；
-深色沿用 Google 网页版暗色规范（底 `#202124`、正文 `#e8eaed`、强调 `#8ab4f8`），
-并设置 `color-scheme: dark` 让原生控件（日期选择、下拉、滚动条）一起变暗。
+主题三档（明亮 / 暗黑 / 跟随系统）由 Go 统一持有，主界面侧栏和会话页顶栏各有一个按钮，
+任一处切换全端同步；深色沿用 Google 网页版暗色规范（底 `#202124`、正文 `#e8eaed`、
+强调 `#8ab4f8`），并设置 `color-scheme: dark` 让原生控件（日期选择、下拉、滚动条）一起变暗。
+工作台是逆向工具，固定深色不跟主题走。
 抓包历史在重启后会自动读回工作台（只保留最近 3000 条，界面只显示最新 400 行）。
 
 `session.Watcher` 每 4 秒探测一次会话页面：登录后自动隐藏会话窗口，掉线后自动弹回来；
@@ -352,7 +379,10 @@ go test ./...
 - [ ] 「所有任务」视图：网页在宽屏下把每个清单渲染成横向并排的列，
       客户端目前按纵向分段渲染（内容一致、更适合桌面窗口），待确认是否改成横向
 - [ ] 主界面与真实网页并排比对，收敛像素级差异（把会话窗口拖到旁边即可）
-- [x] 深色主题（侧栏三态按钮：浅色 → 深色 → 跟随系统，选择存 `localStorage`）
+- [x] 三态主题全局化：Go 持久化 + macOS 原生外观（标题栏、会话页一起变），会话页顶栏也有按钮
+- [x] 会话页桌面化：去「Google 应用」九宫格、「支持」菜单加工作台入口、侧栏列表行「⋮」、
+      自定义右键菜单（去掉前进）
+- [x] 应用图标与 macOS 打包脚本（`build/macos-bundle.sh` / `build/macos-icon.sh`）
 - [x] Windows / Linux 桥接对齐（bootstrap 注入路径、`IsMainFrame` 过滤）+ 交叉编译验证
 - [ ] Windows / Linux 实机冒烟测试（需要真实 Windows / Linux 环境与 Google 账号）
 - [x] 掉线检测与自动重登（健康检查识别 401 / 登录重定向 → 横幅 + 弹窗重载）

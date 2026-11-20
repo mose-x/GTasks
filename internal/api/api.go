@@ -20,6 +20,7 @@ import (
 	"gtasks/internal/bridge"
 	"gtasks/internal/session"
 	"gtasks/internal/tasks"
+	"gtasks/internal/theme"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
@@ -219,6 +220,7 @@ type Handler struct {
 	registry *tasks.Registry
 	service  *tasks.Service
 	watcher  *session.Watcher
+	theme    *theme.Manager
 	dataDir  string
 
 	mu         sync.RWMutex
@@ -234,6 +236,7 @@ type Deps struct {
 	Registry *tasks.Registry
 	Service  *tasks.Service
 	Watcher  *session.Watcher
+	Theme    *theme.Manager
 	DataDir  string
 }
 
@@ -246,6 +249,7 @@ func NewHandler(deps Deps) *Handler {
 		registry: deps.Registry,
 		service:  deps.Service,
 		watcher:  deps.Watcher,
+		theme:    deps.Theme,
 		dataDir:  deps.DataDir,
 	}
 }
@@ -289,6 +293,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.handleConfig(w, r)
 	case path == "/api/session/auto" && r.Method == http.MethodPost:
 		h.handleSessionAuto(w, r)
+	case path == "/api/theme":
+		h.handleTheme(w, r)
 	case path == "/api/eval" && r.Method == http.MethodPost:
 		h.handleEval(w, r)
 	case path == "/api/initdata" && r.Method == http.MethodGet:
@@ -825,6 +831,36 @@ func (h *Handler) handleConfig(w http.ResponseWriter, _ *http.Request) {
 		"autoSniff":   h.watcher != nil && h.watcher.AutoSniff(),
 		"pollSeconds": int(session.DefaultInterval.Seconds()),
 	})
+}
+
+// handleTheme 读写全局外观模式。POST 只接受 mode 字段，切换的实际动作
+// （原生外观 + 各窗口 CSS）由 main 里注册的 theme.OnChange 回调完成。
+func (h *Handler) handleTheme(w http.ResponseWriter, r *http.Request) {
+	if h.theme == nil {
+		writeError(w, http.StatusServiceUnavailable, "主题管理未启用")
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		writeJSON(w, http.StatusOK, map[string]any{"mode": string(h.theme.Mode())})
+	case http.MethodPost:
+		var request struct {
+			Mode string `json:"mode"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			writeError(w, http.StatusBadRequest, "请求体不是合法 JSON")
+			return
+		}
+		mode := theme.Parse(request.Mode)
+		if string(mode) != strings.TrimSpace(request.Mode) {
+			writeError(w, http.StatusBadRequest, "mode 只能是 light / dark / system")
+			return
+		}
+		h.theme.Set(mode)
+		writeJSON(w, http.StatusOK, map[string]any{"mode": string(h.theme.Mode())})
+	default:
+		writeError(w, http.StatusMethodNotAllowed, "该接口只支持 GET / POST")
+	}
 }
 
 func (h *Handler) handleSessionAuto(w http.ResponseWriter, r *http.Request) {

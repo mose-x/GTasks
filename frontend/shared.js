@@ -62,7 +62,13 @@ const THEME_KEY = "gtasks-theme";
 const THEME_MODES = ["light", "dark", "system"];
 const THEME_LABEL = { light: "浅色", dark: "深色", system: "跟随系统" };
 
+// Go 侧是主题的唯一事实来源：它同时切换 macOS 原生外观（标题栏与所有
+// webview 的 prefers-color-scheme 一起变）。localStorage 只作首屏缓存，
+// 避免窗口先闪一帧错误配色再去等 /api/theme 的往返。
+let serverThemeMode = null;
+
 function themeMode() {
+  if (serverThemeMode) return serverThemeMode;
   try {
     const stored = localStorage.getItem(THEME_KEY);
     return THEME_MODES.includes(stored) ? stored : "system";
@@ -82,18 +88,41 @@ function applyTheme(mode) {
   return dark;
 }
 
-function setTheme(mode) {
+function rememberTheme(mode) {
+  serverThemeMode = THEME_MODES.includes(mode) ? mode : "system";
   try {
-    localStorage.setItem(THEME_KEY, mode);
+    localStorage.setItem(THEME_KEY, serverThemeMode);
   } catch {}
-  return applyTheme(mode);
+  return applyTheme(serverThemeMode);
 }
 
-// Cycles 浅色 → 深色 → 跟随系统, mirroring the web app's theme setting.
-function cycleTheme() {
-  const mode = THEME_MODES[(THEME_MODES.indexOf(themeMode()) + 1) % THEME_MODES.length];
-  return { mode, dark: setTheme(mode) };
+function nextThemeMode() {
+  return THEME_MODES[(THEME_MODES.indexOf(themeMode()) + 1) % THEME_MODES.length];
 }
+
+// 拉一次服务端主题；失败就退回本地缓存，界面不至于没配色。
+async function loadServerTheme() {
+  try {
+    const payload = await api("/api/theme");
+    rememberTheme(payload.mode);
+  } catch {
+    applyTheme(themeMode());
+  }
+  return themeMode();
+}
+
+// 切换主题：先本地生效，再通知 Go；Go 广播回来时各窗口自动对齐。
+async function setServerTheme(mode) {
+  rememberTheme(mode);
+  await api("/api/theme", { method: "POST", body: { mode } });
+  return mode;
+}
+
+// Go 切换原生外观后往每个窗口推这个函数。
+window.__gtasksTheme = (mode) => {
+  rememberTheme(mode);
+  document.dispatchEvent(new CustomEvent("gtasks-theme", { detail: mode }));
+};
 
 function initTheme() {
   applyTheme(themeMode());

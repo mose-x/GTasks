@@ -656,6 +656,250 @@
   };
 
   window.__gtask = api;
+  // ------------------------------------------------------------------ UI 层
+  //
+  // 会话窗口就是用户每天真正在用的 tasks.google.com 界面，这里做几处桌面化
+  // 改造。全部走「注入 DOM + 回调 Go」的路线，不替换 Google 自己的逻辑：
+  //   1. 顶栏去掉「Google 应用」九宫格（纯 CSS，见 installUIStyles）；
+  //   2. 顶栏「支持」按钮左边加主题按钮，明亮 / 暗黑 / 跟随系统三档循环；
+  //   3. 「支持」菜单末尾追加「GTasks 工作台」一项；
+  //   4. 侧栏每个任务列表行加「列表选项」入口，点的还是 Google 自己的菜单；
+  //   5. 右键统一交给 Go 弹原生菜单（WebKit 默认菜单带前进/后退，用不上）。
+  //
+  // 测试沙箱里的 document 只有几个字段，没有 DOM API，整段自动跳过。
+
+  var UI_MODES = ["light", "dark", "system"];
+  var UI_THEME_TITLE = { light: "主题：明亮", dark: "主题：暗黑", system: "主题：跟随系统" };
+  var UI_THEME_ICON = {
+    light: '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M12 7c-2.76 0-5 2.24-5 5s2.24 5 5 5 5-2.24 5-5-2.24-5-5-5zM2 13h2c.55 0 1-.45 1-1s-.45-1-1-1H2c-.55 0-1 .45-1 1s.45 1 1 1zm18 0h2c.55 0 1-.45 1-1s-.45-1-1-1h-2c-.55 0-1 .45-1 1s.45 1 1 1zM11 2v2c0 .55.45 1 1 1s1-.45 1-1V2c0-.55-.45-1-1-1s-1 .45-1 1zm0 18v2c0 .55.45 1 1 1s1-.45 1-1v-2c0-.55-.45-1-1-1s-1 .45-1 1zM5.99 4.58c-.39-.39-1.03-.39-1.41 0-.39.39-.39 1.03 0 1.41l1.06 1.06c.39.39 1.03.39 1.41 0s.39-1.03 0-1.41L5.99 4.58zm12.37 12.37c-.39-.39-1.03-.39-1.41 0-.39.39-.39 1.03 0 1.41l1.06 1.06c.39.39 1.03.39 1.41 0 .39-.39.39-1.03 0-1.41l-1.06-1.06zm1.06-10.96c.39-.39.39-1.03 0-1.41-.39-.39-1.03-.39-1.41 0l-1.06 1.06c-.39.39-.39 1.03 0 1.41s1.03.39 1.41 0l1.06-1.06zM7.05 18.36c.39.39.39 1.03 0 1.41-.39.39-1.03.39-1.41 0l-1.06-1.06c-.39-.39-.39-1.03 0-1.41.39-.39 1.03-.39 1.41 0l1.06 1.06z"/></svg>',
+    dark: '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M12 3c-4.97 0-9 4.03-9 9s4.03 9 9 9 9-4.03 9-9c0-.46-.04-.92-.1-1.36-.98 1.37-2.58 2.26-4.4 2.26-2.98 0-5.4-2.42-5.4-5.4 0-1.81.89-3.42 2.26-4.4-.44-.06-.9-.1-1.36-.1z"/></svg>',
+    system: '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M10.85 12.65h2.3L12 9l-1.15 3.65zM20 8.69V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12 20 8.69zM14.3 16l-.7-2h-3.2l-.7 2H7.8L11 7h2l3.2 9h-1.9z"/></svg>'
+  };
+  var UI_MORE_ICON = '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/></svg>';
+  var SUPPORT_MENU_SELECTOR = 'ul[role="menu"][aria-label*="支持"], ul[role="menu"][aria-label*="Support"]';
+  var LIST_ROW_SELECTOR = "li[data-task-list-id]";
+  var LIST_OPTIONS_SELECTOR = '[aria-label="列表选项"], [aria-label="List options"]';
+
+  function uiAvailable() {
+    return typeof document !== "undefined" &&
+      typeof document.createElement === "function" &&
+      typeof document.querySelector === "function" &&
+      typeof MutationObserver === "function";
+  }
+
+  function uiCommand(name, args) {
+    post({ kind: "command", name: name, args: args || {} });
+  }
+
+  function installUIStyles() {
+    if (document.getElementById("gtasks-ui-style")) return;
+    var style = document.createElement("style");
+    style.id = "gtasks-ui-style";
+    style.textContent = [
+      // 「Google 应用」九宫格对桌面客户端没有意义，直接藏掉。
+      'a.gb_C[aria-label*="Google 应用"], a.gb_C[aria-label*="Google apps"], a.gb_C[href*="/about/products"] { display: none !important; }',
+      ".gtasks-hbtn { width: 40px; height: 40px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; color: inherit; flex: none; }",
+      ".gtasks-hbtn:hover, .gtasks-hbtn:focus { background: rgba(128,134,139,.14); outline: none; }",
+      "li[data-task-list-id] { position: relative; }",
+      ".gtasks-rowmenu { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); width: 28px; height: 28px; border-radius: 50%; display: none; align-items: center; justify-content: center; cursor: pointer; color: inherit; z-index: 2; }",
+      "li[data-task-list-id]:hover .gtasks-rowmenu, .gtasks-rowmenu:focus { display: inline-flex; }",
+      ".gtasks-rowmenu:hover { background: rgba(128,134,139,.18); }",
+      // 悬停时把计数让位给「列表选项」，避免两个元素叠在一起。
+      'li[data-task-list-id]:hover > span[jsname="orbTae"] { visibility: hidden; }'
+    ].join("\n");
+    (document.head || document.documentElement).appendChild(style);
+  }
+
+  function themeModeNow() {
+    var mode = window.__gtaskThemeMode;
+    return UI_MODES.indexOf(mode) >= 0 ? mode : "system";
+  }
+
+  function renderThemeButton() {
+    var button = document.getElementById("gtasks-theme-btn");
+    if (!button) return;
+    var mode = themeModeNow();
+    button.innerHTML = UI_THEME_ICON[mode] || UI_THEME_ICON.system;
+    button.title = UI_THEME_TITLE[mode] + "（点击切换）";
+    button.setAttribute("aria-label", UI_THEME_TITLE[mode]);
+  }
+
+  function installHeaderButtons() {
+    var support = document.querySelector('button[aria-label*="支持"], button[aria-label*="Support"]');
+    if (!support || !support.parentElement) return;
+    if (!document.getElementById("gtasks-theme-btn")) {
+      var button = document.createElement("div");
+      button.id = "gtasks-theme-btn";
+      button.className = "gtasks-hbtn";
+      button.setAttribute("role", "button");
+      button.setAttribute("tabindex", "0");
+      button.addEventListener("click", function (event) {
+        event.stopPropagation();
+        event.preventDefault();
+        var next = UI_MODES[(UI_MODES.indexOf(themeModeNow()) + 1) % UI_MODES.length];
+        uiCommand("setTheme", { mode: next });
+      });
+      button.addEventListener("keydown", function (event) {
+        if (event.key === "Enter" || event.key === " ") button.click();
+      });
+      support.parentElement.insertBefore(button, support);
+    }
+    renderThemeButton();
+  }
+
+  function closeMenu(menu) {
+    try {
+      menu.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", keyCode: 27, bubbles: true }));
+    } catch (ignored) {}
+    setTimeout(function () {
+      try {
+        if (menu.isConnected || document.body.contains(menu)) document.body.click();
+      } catch (ignored) {}
+    }, 60);
+  }
+
+  function decorateSupportMenu(menu) {
+    if (!menu || menu.querySelector("[data-gtasks-workbench]")) return;
+    var item = document.createElement("li");
+    item.className = "aqdrmf-rymPhb-ibnC6b aqdrmf-rymPhb-ibnC6b-OWXEXe-hXIJHe aqdrmf-rymPhb-ibnC6b-OWXEXe-SfQLQb-Woal0c-RWgCYc O68mGe-xl07Ob-ibnC6b-OWXEXe-r08add";
+    item.setAttribute("role", "menuitem");
+    item.setAttribute("tabindex", "0");
+    item.setAttribute("data-gtasks-workbench", "1");
+    item.innerHTML =
+      '<span class="UTNHae"></span><span class="dNKuRb aqdrmf-rymPhb-sNKcce"></span>' +
+      '<span class="aqdrmf-rymPhb-KkROqb"></span>' +
+      '<span class="aqdrmf-rymPhb-Gtdoyb"><span class="aqdrmf-rymPhb-fpDzbe-fmcmS">GTasks 工作台</span></span>' +
+      '<span class="aqdrmf-rymPhb-JMEf7e"></span>';
+    item.addEventListener("click", function (event) {
+      event.stopPropagation();
+      event.preventDefault();
+      closeMenu(menu);
+      uiCommand("openWorkbench", {});
+    });
+    menu.appendChild(item);
+  }
+
+  // 内容区的「列表选项」按钮和清单标题在同一个 section 里，标题 id 就是
+  // "<清单id>_label"，侧栏行上的 data-task-list-id 与之对应。
+  function listOptionsButton(listId) {
+    if (!listId) return null;
+    var heading = document.getElementById(listId + "_label");
+    if (!heading) return null;
+    var section = heading.parentElement;
+    for (var depth = 0; section && depth < 8; depth++) {
+      var button = section.querySelector(LIST_OPTIONS_SELECTOR);
+      if (button) return button;
+      section = section.parentElement;
+    }
+    return null;
+  }
+
+  function openListOptions(listId) {
+    var button = listOptionsButton(listId);
+    if (button) {
+      button.click();
+      return;
+    }
+    var row = document.querySelector(LIST_ROW_SELECTOR + '[data-task-list-id="' + listId + '"]');
+    if (!row) return;
+    // 该清单当前没在内容区渲染（多列视图只渲染选中的）：先切过去，等内容区
+    // 出来再点它自己的「列表选项」，菜单内容和手工点完全一致。
+    row.click();
+    var tries = 0;
+    var timer = setInterval(function () {
+      tries += 1;
+      var target = listOptionsButton(listId);
+      if (target) {
+        clearInterval(timer);
+        target.click();
+      } else if (tries > 25) {
+        clearInterval(timer);
+      }
+    }, 80);
+  }
+
+  function decorateRow(row) {
+    if (!row || row.querySelector("[data-gtasks-rowmenu]")) return;
+    var button = document.createElement("span");
+    button.className = "gtasks-rowmenu";
+    button.setAttribute("data-gtasks-rowmenu", "1");
+    button.setAttribute("role", "button");
+    button.setAttribute("tabindex", "-1");
+    button.title = "列表选项";
+    button.innerHTML = UI_MORE_ICON;
+    button.addEventListener("click", function (event) {
+      event.stopPropagation();
+      event.preventDefault();
+      openListOptions(row.getAttribute("data-task-list-id"));
+    });
+    row.appendChild(button);
+  }
+
+  function decorateRows(root) {
+    var scope = root || document;
+    if (!scope.querySelectorAll) return;
+    var rows = scope.querySelectorAll(LIST_ROW_SELECTOR);
+    for (var index = 0; index < rows.length; index++) decorateRow(rows[index]);
+  }
+
+  function installContextMenu() {
+    // 捕获阶段拦截，WebKit 的原生右键菜单（含前进/后退）就不会出现。
+    document.addEventListener("contextmenu", function (event) {
+      if (event.defaultPrevented) return;
+      event.preventDefault();
+      uiCommand("contextMenu", { x: event.clientX, y: event.clientY });
+    }, true);
+  }
+
+  function observeUI() {
+    var observer = new MutationObserver(function (records) {
+      var needsHeader = !document.getElementById("gtasks-theme-btn");
+      for (var index = 0; index < records.length; index++) {
+        var added = records[index].addedNodes;
+        for (var nodeIndex = 0; nodeIndex < added.length; nodeIndex++) {
+          var node = added[nodeIndex];
+          if (!node || node.nodeType !== 1) continue;
+          if (!needsHeader && node.matches && node.matches(SUPPORT_MENU_SELECTOR)) {
+            decorateSupportMenu(node);
+          } else if (!needsHeader && node.querySelector) {
+            var menu = node.querySelector(SUPPORT_MENU_SELECTOR);
+            if (menu) decorateSupportMenu(menu);
+          }
+          if (node.matches && node.matches(LIST_ROW_SELECTOR)) decorateRow(node);
+          else if (node.querySelector && node.querySelector(LIST_ROW_SELECTOR)) decorateRows(node);
+        }
+      }
+      if (needsHeader) installHeaderButtons();
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+  }
+
+  function installUI() {
+    if (!uiAvailable() || location.hostname !== "tasks.google.com") return;
+    if (window.__gtaskUIInstalled) {
+      renderThemeButton();
+      decorateRows(document);
+      return;
+    }
+    window.__gtaskUIInstalled = true;
+    var boot = function () {
+      installUIStyles();
+      installContextMenu();
+      installHeaderButtons();
+      decorateRows(document);
+      decorateSupportMenu(document.querySelector(SUPPORT_MENU_SELECTOR));
+      observeUI();
+    };
+    if (document.body) boot();
+    else document.addEventListener("DOMContentLoaded", boot);
+  }
+
+  // Go 侧在页面 ready 后把当前主题推下来，按钮图标随之刷新。
+  api.setThemeMode = function (mode) {
+    window.__gtaskThemeMode = UI_MODES.indexOf(mode) >= 0 ? mode : "system";
+    renderThemeButton();
+  };
+
 
   installInitDataRecorder();
 
@@ -674,6 +918,8 @@
   }
 
   api.announce();
+
+  installUI();
 
   // Document-start injection (Windows) announces before WIZ_global_data exists,
   // so re-announce once the page has finished loading. The Go watcher also polls,

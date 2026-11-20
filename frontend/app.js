@@ -863,10 +863,14 @@ function renderAll() {
 function bindUI() {
   $("btnDemo").addEventListener("click", () => toggleDemo());
   $("btnTheme").addEventListener("click", () => {
-    const { mode } = cycleTheme();
+    const mode = nextThemeMode();
     renderThemeButton();
-    toast(`主题：${THEME_LABEL[mode]}`);
+    setServerTheme(mode)
+      .then(() => toast(`主题：${THEME_LABEL[mode]}`))
+      .catch((error) => toast(`主题切换失败：${error.message}`, true));
   });
+  // 会话页面的主题按钮切档时，Go 会广播到本窗口。
+  document.addEventListener("gtasks-theme", () => renderThemeButton());
   $("btnCloseDetail").addEventListener("click", closeDetail);
   $("btnDeleteTask").addEventListener("click", () => deleteTask());
   $("btnRefresh").addEventListener("click", () => {
@@ -917,6 +921,7 @@ function bindUI() {
 
 async function init() {
   initTheme();
+  await loadServerTheme();
   renderThemeButton();
   bindUI();
   await refreshOps();

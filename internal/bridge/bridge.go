@@ -61,10 +61,21 @@ type envelope struct {
 	Error string          `json:"error,omitempty"`
 	Entry json.RawMessage `json:"entry,omitempty"`
 	Info  json.RawMessage `json:"info,omitempty"`
+	Name  string          `json:"name,omitempty"`
+	Args  map[string]any  `json:"args,omitempty"`
 }
 
 // SniffHandler receives one decoded batchexecute capture from the page.
 type SniffHandler func(entry json.RawMessage)
+
+// CommandHandler receives a fire-and-forget UI command posted by the page
+// (open the workbench, switch theme, show the native context menu, ...).
+// It runs on a worker goroutine, never on the webview message thread.
+type CommandHandler func(name string, args map[string]any)
+
+// ReadyHandler is invoked once per page load, right after the bootstrap
+// announces itself and unlocks ExecJS.
+type ReadyHandler func(info json.RawMessage)
 
 // Bridge multiplexes concurrent Go calls onto a single session window.
 type Bridge struct {
@@ -74,6 +85,8 @@ type Bridge struct {
 	window  *application.WebviewWindow
 	name    string
 	sniff   SniffHandler
+	command CommandHandler
+	onReady ReadyHandler
 
 	stateMu sync.RWMutex
 	ready   bool
@@ -89,6 +102,20 @@ func New() *Bridge {
 func (b *Bridge) SetSniffHandler(handler SniffHandler) {
 	b.mu.Lock()
 	b.sniff = handler
+	b.mu.Unlock()
+}
+
+// SetCommandHandler registers the callback for UI commands posted by the page.
+func (b *Bridge) SetCommandHandler(handler CommandHandler) {
+	b.mu.Lock()
+	b.command = handler
+	b.mu.Unlock()
+}
+
+// SetReadyHandler registers the callback fired when the page announces itself.
+func (b *Bridge) SetReadyHandler(handler ReadyHandler) {
+	b.mu.Lock()
+	b.onReady = handler
 	b.mu.Unlock()
 }
 
@@ -146,6 +173,20 @@ func (b *Bridge) HandleRaw(window application.Window, message string, origin *ap
 		b.ready = true
 		b.info = decoded.Info
 		b.stateMu.Unlock()
+		b.mu.Lock()
+		handler := b.onReady
+		b.mu.Unlock()
+		if handler != nil {
+			go handler(decoded.Info)
+		}
+
+	case "command":
+		b.mu.Lock()
+		handler := b.command
+		b.mu.Unlock()
+		if handler != nil {
+			go handler(decoded.Name, decoded.Args)
+		}
 
 	case "result":
 		b.mu.Lock()

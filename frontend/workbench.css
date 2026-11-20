@@ -12,6 +12,12 @@
   --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
 }
 
+/* 同 styles.css：右键交给 Go 的原生自定义菜单。 */
+html {
+  --custom-contextmenu: gtasks-context;
+  --custom-contextmenu-data: workbench;
+}
+
 * { box-sizing: border-box; }
 
 body {
