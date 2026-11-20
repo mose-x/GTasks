@@ -343,7 +343,7 @@ func (h *Handler) handleState(w http.ResponseWriter, _ *http.Request) {
 		definitions := h.registry.All()
 		response.OpsTotal = len(definitions)
 		for _, definition := range definitions {
-			if definition.Ready() {
+			if executable(definition) {
 				response.OpsReady++
 			}
 		}
@@ -381,6 +381,44 @@ func (h *Handler) handleSession(w http.ResponseWriter, r *http.Request) {
 		sessionWin.Show()
 	case "hide":
 		sessionWin.Hide()
+	case "focus":
+		// 被其它窗口完全遮住时，WebKit 会把页面标成 hidden，Google 的前端会
+		// 停止渲染并忽略交互；逆向时需要能把会话窗口真正拉到前台。
+		sessionWin.Show()
+		sessionWin.Center()
+		sessionWin.Focus()
+	case "float":
+		sessionWin.Show()
+		sessionWin.Center()
+		sessionWin.SetAlwaysOnTop(true)
+		sessionWin.Focus()
+	case "sink":
+		sessionWin.SetAlwaysOnTop(false)
+	case "windows":
+		list := make([]map[string]any, 0, 4)
+		for _, win := range application.Get().Window.GetAll() {
+			wv, ok := win.(*application.WebviewWindow)
+			if !ok {
+				continue
+			}
+			x, y := wv.Position()
+			width, height := wv.Size()
+			list = append(list, map[string]any{
+				"name": wv.Name(), "visible": wv.IsVisible(), "minimised": wv.IsMinimised(),
+				"x": x, "y": y, "width": width, "height": height,
+			})
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "windows": list})
+		return
+	case "info":
+		x, y := sessionWin.Position()
+		width, height := sessionWin.Size()
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok": true, "action": request.Action, "visible": sessionWin.IsVisible(),
+			"minimised": sessionWin.IsMinimised(), "x": x, "y": y,
+			"width": width, "height": height,
+		})
+		return
 	case "reload":
 		sessionWin.Reload()
 	case "navigate":
@@ -687,17 +725,43 @@ func (h *Handler) handleOpsList(w http.ResponseWriter, _ *http.Request) {
 	definitions := h.registry.All()
 	ready := 0
 	for _, definition := range definitions {
-		if definition.Ready() {
+		if executable(definition) {
 			ready++
 		}
 	}
+
+	// 同步通道实现的操作没有 steps，但一样能跑；待发现列表里要把它们摘掉，
+	// 否则工作台会一直提示去抓包。
+	syncOps := tasks.SyncOps()
+	isSync := make(map[tasks.Operation]bool, len(syncOps))
+	syncNotes := make(map[string]string, len(syncOps))
+	for _, op := range syncOps {
+		isSync[op] = true
+		syncNotes[string(op)] = tasks.SyncOpNotes(op)
+	}
+	pending := make([]tasks.Operation, 0, len(definitions))
+	for _, op := range h.registry.Pending() {
+		if !isSync[op] {
+			pending = append(pending, op)
+		}
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{
 		"path":      h.registry.Path(),
 		"ready":     ready,
 		"total":     len(definitions),
-		"pending":   h.registry.Pending(),
+		"pending":   pending,
 		"operation": definitions,
+		"sync":      syncOps,
+		"syncNotes": syncNotes,
 	})
+}
+
+// executable reports whether an operation can actually run: either the registry
+// carries captured rpcid steps for it, or the Go side synthesises its sync
+// payload directly.
+func executable(definition tasks.Definition) bool {
+	return definition.Ready() || tasks.IsSyncOp(definition.Op)
 }
 
 func (h *Handler) handleOpsAssign(w http.ResponseWriter, r *http.Request) {

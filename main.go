@@ -176,6 +176,11 @@ func main() {
 			sessionWindow.Show()
 		}
 	})
+	if os.Getenv("GTASKS_SESSION_AUTOMANAGE") == "0" {
+		// 逆向调试时让会话窗口一直留在屏幕上：页面被判定为 hidden 时 Google 的
+		// 前端不渲染，DOM 是空的，没法驱动真实操作来抓写入报文。
+		watcher.SetAutoManage(false)
+	}
 	watcher.Start()
 
 	if err := app.Run(); err != nil {

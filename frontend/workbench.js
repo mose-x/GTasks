@@ -3,6 +3,8 @@
 
 let sniffCursor = 0;
 let operations = [];
+// 由 Go 直接合成 SOV0tb 同步报文的操作：没有 steps，但同样可执行。
+let syncOps = new Set();
 let selectedCapture = null;
 let timers = [];
 let historyNoted = false;
@@ -305,12 +307,19 @@ async function loadOps() {
   try {
     const payload = await api("/api/ops");
     operations = payload.operation || [];
+    syncOps = new Set(payload.sync || []);
     renderOps();
     renderOpSelects();
     setBadge("badgeOps", `操作: ${payload.ready}/${payload.total}`, payload.ready ? "ok" : "");
   } catch (error) {
     toast(error.message, true);
   }
+}
+
+// opExecutable 判断一个操作能不能跑：要么已经固化了 rpcid，要么写入层已经用
+// 同步通道实现。
+function opExecutable(definition) {
+  return !!(definition.steps && definition.steps.length) || syncOps.has(definition.op);
 }
 
 function renderOps() {
@@ -324,7 +333,7 @@ function renderOps() {
     head.className = "op-head";
     const state = document.createElement("span");
     state.className = "op-state";
-    state.textContent = definition.steps && definition.steps.length ? "✅" : "⏳";
+    state.textContent = opExecutable(definition) ? "✅" : "⏳";
     const label = document.createElement("span");
     label.className = "op-label";
     label.textContent = definition.label || definition.op;
@@ -333,7 +342,8 @@ function renderOps() {
     key.textContent = definition.op;
     const rpcids = document.createElement("span");
     rpcids.className = "op-rpcids";
-    rpcids.textContent = (definition.steps || []).map((step) => step.rpcid).join(", ");
+    rpcids.textContent = (definition.steps || []).map((step) => step.rpcid).join(", ")
+      || (syncOps.has(definition.op) ? "SOV0tb（同步通道）" : "");
     head.append(state, label, key, rpcids);
     head.addEventListener("click", () => item.classList.toggle("open"));
 
@@ -377,7 +387,7 @@ function renderOpSelects() {
   ready.label = "已配置";
 
   for (const definition of operations) {
-    const isReady = definition.steps && definition.steps.length > 0;
+    const isReady = opExecutable(definition);
     const option = document.createElement("option");
     option.value = definition.op;
     option.textContent = `${definition.label || definition.op} (${definition.op})`;

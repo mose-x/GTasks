@@ -60,7 +60,11 @@ const store = {
 async function refreshOps() {
   try {
     const payload = await api("/api/ops");
-    store.ops = new Map((payload.operation || []).map((d) => [d.op, !!(d.steps && d.steps.length)]));
+    // 写入类操作由 Go 直接合成 SOV0tb 同步报文，没有 steps，但同样可以执行。
+    const synced = new Set(payload.sync || []);
+    store.ops = new Map(
+      (payload.operation || []).map((d) => [d.op, !!(d.steps && d.steps.length) || synced.has(d.op)]),
+    );
     return payload;
   } catch {
     return null;

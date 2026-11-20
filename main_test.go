@@ -81,10 +81,10 @@ func TestAssetHandlerRoutesAPI(t *testing.T) {
 	if state.OpsTotal == 0 {
 		t.Fatal("state should report the bundled operation catalogue")
 	}
-	// The read path ships discovered; every write operation still has to be
-	// captured per account.
-	if state.OpsReady != 1 {
-		t.Fatalf("expected only the snapshot operation to be discovered, got %d", state.OpsReady)
+	// The read path ships discovered, and so does every operation the sync
+	// channel implements in Go; the rest still has to be captured per account.
+	if want := 1 + len(tasks.SyncOps()); state.OpsReady != want {
+		t.Fatalf("expected %d executable operations (snapshot + sync channel), got %d", want, state.OpsReady)
 	}
 }
 
@@ -105,12 +105,18 @@ func TestAssetHandlerListsOperations(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("ops payload is not JSON: %v", err)
 	}
-	if payload.Ready != 1 || payload.Total != len(payload.Pending)+1 {
-		t.Fatalf("expected every operation but the snapshot to be pending, got %+v", payload)
+	ready := 1 + len(tasks.SyncOps())
+	if payload.Ready != ready || payload.Total != len(payload.Pending)+ready {
+		t.Fatalf("expected %d executable operations and the rest pending, got %+v", ready, payload)
 	}
 	for _, op := range payload.Pending {
 		if op == string(tasks.OpSnapshot) {
 			t.Fatalf("%s should not be pending", tasks.OpSnapshot)
+		}
+		// 同步通道已经实现的操作不该再出现在待发现列表里，否则工作台会一直
+		// 提示去抓包。
+		if tasks.IsSyncOp(tasks.Operation(op)) {
+			t.Fatalf("%s is implemented over the sync channel and must not be pending", op)
 		}
 	}
 }

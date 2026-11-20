@@ -41,12 +41,14 @@ func (t Timestamp) MarshalJSON() ([]byte, error) {
 }
 
 // Due is a task's due date plus optional time of day. The public Tasks API only
-// carries the date, which is one of the reasons this client exists. No slot in
-// the read payload has been confirmed to hold them yet, so Due stays nil until
-// a capture pins the position down; the slot then lands in DetailExtra first.
+// carries the date, which is one of the reasons this client exists. In the read
+// payload it is field 18 of the task's detail message — a message holding one
+// timestamp — and Time stays empty for an all-day due.
 type Due struct {
 	Date string `json:"date"`
-	Time string `json:"time"`
+	// Time is empty for an all-day due, which is how the web app tells the two
+	// apart too.
+	Time string `json:"time,omitempty"`
 }
 
 // SlotBag keeps positional slots that have not been mapped to a meaning yet,
@@ -120,7 +122,7 @@ type Snapshot struct {
 // UI. Anything outside these sets is preserved in a SlotBag.
 var (
 	knownTaskSlots   = map[int]bool{0: true, 1: true, 2: true, 3: true, 8: true, 10: true, 12: true}
-	knownDetailSlots = map[int]bool{0: true, 1: true, 2: true, 4: true, 13: true, 14: true}
+	knownDetailSlots = map[int]bool{0: true, 1: true, 2: true, 4: true, 13: true, 14: true, 17: true}
 	knownListSlots   = map[int]bool{0: true, 1: true, 2: true, 5: true, 7: true, 9: true}
 	knownMetaSlots   = map[int]bool{0: true, 2: true}
 )
@@ -257,6 +259,7 @@ func parseTask(inner json.RawMessage) (Task, error) {
 		// It is a flag at 13 plus the time it was set at 14.
 		task.Starred = rawBool(at(detail, 13))
 		task.StarredAt = rawTimestamp(at(detail, 14))
+		task.Due = rawDue(at(detail, 17))
 		task.DetailExtra = keepUnknown(detail, knownDetailSlots)
 	}
 	task.Extra = keepUnknown(fields, knownTaskSlots)
@@ -520,6 +523,30 @@ func rawInt(raw json.RawMessage) int64 {
 		return 0
 	}
 	return int64(value)
+}
+
+// rawDue reads the due slot of a task's detail message: a one field message
+// wrapping the [秒, 纳秒] pair, which is why it sits a level deeper than every
+// other timestamp in the payload.
+//
+// Google stores an all-day due as UTC midnight, and that is also how the two
+// forms are told apart on the way back out: UTC midnight renders as a bare date,
+// anything else as the local date plus the local time of day.
+func rawDue(raw json.RawMessage) *Due {
+	outer, err := decodeArray(raw)
+	if err != nil || len(outer) == 0 {
+		return nil
+	}
+	stamp := rawTimestamp(at(outer, 0))
+	if stamp.IsZero() {
+		return nil
+	}
+	value := stamp.Time().UTC()
+	if value.Hour() == 0 && value.Minute() == 0 && value.Second() == 0 && value.Nanosecond() == 0 {
+		return &Due{Date: value.Format("2006-01-02")}
+	}
+	local := stamp.Time()
+	return &Due{Date: local.Format("2006-01-02"), Time: local.Format("15:04")}
 }
 
 func rawTimestamp(raw json.RawMessage) Timestamp {

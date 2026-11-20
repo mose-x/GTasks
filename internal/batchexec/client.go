@@ -95,6 +95,22 @@ func (c *Client) Probe(ctx context.Context) (*Session, error) {
 	return &session, nil
 }
 
+// CachedSession returns the most recent session payload the page reported,
+// without issuing a call. It is nil until the page has been probed at least
+// once. Callers that need the current build label between probes use this
+// instead of paying for a round trip.
+func (c *Client) CachedSession() *Session {
+	cached := c.bridge.Info()
+	if len(cached) == 0 {
+		return nil
+	}
+	var session Session
+	if err := json.Unmarshal(cached, &session); err != nil {
+		return nil
+	}
+	return &session
+}
+
 // Batch sends one or more RPCs in a single request and decodes the result.
 func (c *Client) Batch(ctx context.Context, calls []Call, options Options) (*BatchResult, error) {
 	if len(calls) == 0 {
