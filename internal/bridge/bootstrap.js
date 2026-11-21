@@ -219,7 +219,15 @@
     window.__gtaskSniffed = (window.__gtaskSniffed || 0) + 1;
     entry.t = Date.now();
     entry.href = location.href;
+    // 桌面化改造的副作用 RPC（比如为未勾选清单临时显隐）打个标，
+    // 工作台会把连续的内部调用折叠成一行，不污染逆向视线。
+    if (window.__gtasksInternalRpc) entry.internal = true;
     post({ kind: "sniff", entry: entry });
+  }
+
+  function markInternalRpc(ms) {
+    window.__gtasksInternalRpc = true;
+    setTimeout(function () { window.__gtasksInternalRpc = false; }, ms || 1500);
   }
 
   // 页面经常传 Request 对象而不是 (url, init)，此时 init 里没有 body，只能
@@ -672,8 +680,59 @@
   //
   // 测试沙箱里的 document 只有几个字段，没有 DOM API，整段自动跳过。
 
+  // 会话页注入的那几颗按钮 / 菜单项同样跟着语言走：词表由 Go 持有，页面 ready
+  // 后推一次 setI18n，切语言时再推一次。取不到词就用代码里的中文兜底。
+  var UI_I18N_KEY = "gtasks-i18n";
+
+  function cachedI18n() {
+    try {
+      var raw = window.localStorage ? localStorage.getItem(UI_I18N_KEY) : null;
+      var parsed = raw ? JSON.parse(raw) : null;
+      if (parsed && parsed.messages && typeof parsed.messages === "object") return parsed;
+    } catch (ignored) {}
+    return null;
+  }
+
+  window.__gtasksI18n = cachedI18n() || window.__gtasksI18n || { lang: "zh", messages: {}, items: [] };
+
+  function tt(key, fallback, params) {
+    var text = window.__gtasksI18n.messages[key];
+    if (typeof text !== "string" || text === "") text = fallback === undefined ? key : fallback;
+    if (params) {
+      for (var name in params) {
+        if (Object.prototype.hasOwnProperty.call(params, name)) {
+          text = text.split("{" + name + "}").join(String(params[name]));
+        }
+      }
+    }
+    return text;
+  }
+
+  function i18nLabelOf(code) {
+    var items = window.__gtasksI18n.items || [];
+    for (var index = 0; index < items.length; index++) {
+      if (items[index] && items[index].code === code) return items[index].label;
+    }
+    return code;
+  }
+
   var UI_MODES = ["light", "dark", "system"];
-  var UI_THEME_TITLE = { light: "主题：明亮", dark: "主题：暗黑", system: "主题：跟随系统" };
+  var UI_THEME_LABEL = { light: "明亮", dark: "暗黑", system: "跟随系统" };
+  var UI_THEME_LABEL_KEY = { light: "theme.light", dark: "theme.dark", system: "theme.system" };
+
+  function themeTitle(mode) {
+    return tt("main.themeTitle", "主题：{mode}", {
+      mode: tt(UI_THEME_LABEL_KEY[mode] || "theme.system", UI_THEME_LABEL[mode] || mode)
+    });
+  }
+
+  function langTitle() {
+    return tt("main.langTitle", "语言：{label}", { label: i18nLabelOf(window.__gtasksI18n.lang) });
+  }
+
+  function listOptionsTitle() {
+    return tt("session.listOptions", "列表选项");
+  }
   // 与 frontend/shared.js 用同一个键名：两个窗口各自的 origin 下都存一份，
   // 首屏（以及下面的启动遮罩）不必等 Go 回话就能拿到正确配色。
   var UI_THEME_KEY = "gtasks-theme";
@@ -683,6 +742,7 @@
     system: '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M10.85 12.65h2.3L12 9l-1.15 3.65zM20 8.69V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12 20 8.69zM14.3 16l-.7-2h-3.2l-.7 2H7.8L11 7h2l3.2 9h-1.9z"/></svg>'
   };
   var UI_MORE_ICON = '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/></svg>';
+  var UI_LANG_ICON = '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zm6.93 6h-2.95a15.65 15.65 0 0 0-1.38-3.56A8.03 8.03 0 0 1 18.92 8zM12 4.04c.83 1.2 1.48 2.53 1.91 3.96h-3.82c.43-1.43 1.08-2.76 1.91-3.96zM4.26 14C4.1 13.36 4 12.69 4 12s.1-1.36.26-2h3.38c-.08.66-.14 1.32-.14 2 0 .68.06 1.34.14 2H4.26zm.82 2h2.95c.32 1.25.78 2.45 1.38 3.56A7.987 7.987 0 0 1 5.08 16zm2.95-8H5.08a7.987 7.987 0 0 1 4.33-3.56A15.65 15.65 0 0 0 8.03 8zM12 19.96c-.83-1.2-1.48-2.53-1.91-3.96h3.82c-.43 1.43-1.08 2.76-1.91 3.96zM14.34 14H9.66c-.09-.66-.16-1.32-.16-2 0-.68.07-1.35.16-2h4.68c.09.65.16 1.32.16 2 0 .68-.07 1.34-.16 2zm.25 5.56c.6-1.11 1.06-2.31 1.38-3.56h2.95a8.03 8.03 0 0 1-4.33 3.56zM16.36 14c.08-.66.14-1.32.14-2 0-.68-.06-1.34-.14-2h3.38c.16.64.26 1.31.26 2s-.1 1.36-.26 2h-3.38z"/></svg>';
   var SUPPORT_MENU_SELECTOR = 'ul[role="menu"][aria-label*="支持"], ul[role="menu"][aria-label*="Support"]';
   var SUPPORT_BUTTON_SELECTOR = 'button[aria-label*="支持"], button[aria-label*="Support"]';
   var LIST_ROW_SELECTOR = "li[data-task-list-id]";
@@ -712,11 +772,16 @@
       'a.gb_C[aria-label*="Google 应用"], a.gb_C[aria-label*="Google apps"], a.gb_C[href*="/about/products"] { display: none !important; }',
       ".gtasks-hbtn { width: 40px; height: 40px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; color: inherit; }",
       ".gtasks-hbtn:hover, .gtasks-hbtn:focus { background: rgba(128,134,139,.14); outline: none; }",
-      // 主题按钮绝对定位到「?」右侧。Google 那个行内容器里混着 block 级的
-      // 墨水（ripple）容器，按钮留在行内会被挤到第二行，把顶栏撑高 40px，
-      // 连带「支持」菜单也弹到顶栏上面去。宿主容器补 padding 让出位置，
-      // 具体 top/right 由 installHeaderButtons 按实测偏移写死。
-      "[data-gtasks-theme-host] { padding-right: 48px !important; box-sizing: border-box; }",
+      // 主题 / 语言两颗按钮绝对定位在「?」右边的空档里。Google 那个行内容器里混着
+      // block 级的墨水（ripple）容器，按钮留在行内会被挤到第二行，把顶栏撑高 40px，
+      // 连带「支持」菜单也弹到顶栏上面去。
+      // 注意 .gb_Pe 是 overflow:hidden 的裁剪盒（96px 宽，只够「?」+ 一颗按钮），
+      // 画到它盒子外面的部分直接不显示；左边的 .gb_fe 是 flex:1 的空档，所以把裁剪
+      // 盒加宽 44px 正好腾出第二颗按钮的位置，头像和「?」都不动。
+      ".gb_Pe.gb_Oe { width: 140px !important; min-width: 140px !important; }",
+      // 裁剪盒加宽后左边多出 88px 空档：把「?」整体右移让出来，两颗按钮摆在它
+      // 左边，从左到右「主题 / 语言 / ?」，和主窗口侧栏的顺序一致。
+      "[data-gtasks-theme-host] { margin-left: 88px !important; }",
       "li[data-task-list-id] { position: relative; }",
       ".gtasks-rowmenu { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); width: 28px; height: 28px; border-radius: 50%; display: none; align-items: center; justify-content: center; cursor: pointer; color: inherit; z-index: 2; }",
       "li[data-task-list-id]:hover .gtasks-rowmenu, .gtasks-rowmenu:focus { display: inline-flex; }",
@@ -743,8 +808,16 @@
     if (!button) return;
     var mode = themeModeNow();
     button.innerHTML = UI_THEME_ICON[mode] || UI_THEME_ICON.system;
-    button.title = UI_THEME_TITLE[mode];
-    button.setAttribute("aria-label", UI_THEME_TITLE[mode]);
+    button.title = themeTitle(mode);
+    button.setAttribute("aria-label", button.title);
+  }
+
+  function renderLangButton() {
+    var button = document.getElementById("gtasks-lang-btn");
+    if (!button) return;
+    button.innerHTML = UI_LANG_ICON;
+    button.title = langTitle();
+    button.setAttribute("aria-label", button.title);
   }
 
   // 「?」按钮最近的定位祖先（实测是 .yVc39c，position:relative）。找不到就退
@@ -762,41 +835,115 @@
     return fallback;
   }
 
-  function installHeaderButtons() {
-    var support = document.querySelector(SUPPORT_BUTTON_SELECTOR);
-    if (!support) return;
-    var host = themeHost(support);
-    if (!host) return;
-    host.setAttribute("data-gtasks-theme-host", "1");
-    var button = document.getElementById("gtasks-theme-btn");
+  // 弹原生单选菜单的按钮都长一样：位置贴着按钮下沿报给 Go。
+  function menuButton(id, render, command) {
+    var button = document.getElementById(id);
     if (!button) {
       button = document.createElement("div");
-      button.id = "gtasks-theme-btn";
+      button.id = id;
       button.className = "gtasks-hbtn";
       button.setAttribute("role", "button");
       button.setAttribute("tabindex", "0");
       button.addEventListener("click", function (event) {
         event.stopPropagation();
         event.preventDefault();
-        // 三档选择交给 Go 弹原生单选菜单，位置贴着这颗按钮的下沿。
         var rect = button.getBoundingClientRect();
-        uiCommand("openThemeMenu", { x: Math.round(rect.left), y: Math.round(rect.bottom + 4) });
+        uiCommand(command, { x: Math.round(rect.left), y: Math.round(rect.bottom + 4) });
       });
       button.addEventListener("keydown", function (event) {
         if (event.key === "Enter" || event.key === " ") button.click();
       });
     }
-    // 挂在宿主容器上（不是「?」所在的那个 span）：绝对定位不参与行内排版，
-    // Google 之后怎么重排自己的子节点都影响不到我们。
-    if (button.parentElement !== host) host.appendChild(button);
-    // padding-right 生效后「?」已经左移，按实测偏移把主题按钮摆到它右边 4px。
+    render();
+    return button;
+  }
+
+  function placeHeaderButton(button, top, right) {
+    button.style.position = "absolute";
+    button.style.top = top + "px";
+    button.style.right = right + "px";
+  }
+
+  var headerPlaceTries = 0;
+
+  // 两颗按钮摆到「?」左边的空档里（主题 / 语言 / ?）。锚点用「?」的实测位置：
+  // 首屏那一瞬 Google 的图标还没排版完，量到的宽度可能是 0，这种时候先不摆，
+  // 稍后重试；窗口尺寸变了也重摆一次（顶栏是右对齐的）。
+  function placeHeaderButtons(host, support, themeButton, langButton) {
     void host.offsetWidth;
     var supportRect = support.getBoundingClientRect();
     var hostRect = host.getBoundingClientRect();
-    button.style.position = "absolute";
-    button.style.top = Math.round(supportRect.top - hostRect.top) + "px";
-    button.style.right = Math.max(2, Math.round(hostRect.right - supportRect.right) - 44) + "px";
+    if (supportRect.width < 8 || hostRect.width < 8) {
+      if (headerPlaceTries++ < 20) {
+        setTimeout(function () { placeHeaderButtons(host, support, themeButton, langButton); }, 150);
+      }
+      return;
+    }
+    headerPlaceTries = 0;
+    var top = Math.round(supportRect.top - hostRect.top);
+    // 「?」左移后它左边腾出的空档正好放两颗按钮：主题贴「?」左侧 8px（40+4+4），
+    // 语言再往左一格。right 相对宿主盒子算。
+    var themeRight = Math.round(hostRect.right - supportRect.left) + 48;
+    placeHeaderButton(themeButton, top, themeRight);
+    placeHeaderButton(langButton, top, themeRight - 44);
+  }
+
+
+  function installHeaderButtons() {
+    var support = document.querySelector(SUPPORT_BUTTON_SELECTOR);
+    if (!support) return;
+    var host = themeHost(support);
+    if (!host) return;
+    host.setAttribute("data-gtasks-theme-host", "1");
+    var themeButton = menuButton("gtasks-theme-btn", renderThemeButton, "openThemeMenu");
+    var langButton = menuButton("gtasks-lang-btn", renderLangButton, "openLangMenu");
+    // 挂在宿主容器上（不是「?」所在的那个 span）：绝对定位不参与行内排版，
+    // Google 之后怎么重排自己的子节点都影响不到我们。
+    if (themeButton.parentElement !== host) host.appendChild(themeButton);
+    if (langButton.parentElement !== host) host.appendChild(langButton);
+    placeHeaderButtons(host, support, themeButton, langButton);
+  }
+
+  // 首屏那几秒 Google 会重排顶栏（图标异步加载、九宫格隐藏后回流），量到的位置
+  // 只是当时的快照，所以摆好之后再按几个时间点校正；窗口 resize 也重摆。
+  var HEADER_PLACE_DELAYS = [200, 700, 1800, 4000];
+
+  function scheduleHeaderPlacement() {
+    for (var index = 0; index < HEADER_PLACE_DELAYS.length; index++) {
+      setTimeout(replaceHeaderButtons, HEADER_PLACE_DELAYS[index]);
+    }
+  }
+
+  // 重新量一次并摆放（窗口 resize、Google 重排顶栏时用）。
+  function replaceHeaderButtons() {
+    var support = document.querySelector(SUPPORT_BUTTON_SELECTOR);
+    var themeButton = document.getElementById("gtasks-theme-btn");
+    var langButton = document.getElementById("gtasks-lang-btn");
+    if (!support || !themeButton || !langButton) return;
+    var host = themeHost(support);
+    if (!host) return;
+    placeHeaderButtons(host, support, themeButton, langButton);
+  }
+
+  // 词表到位（或换了语言）之后，把页面上已经注入的文案统一刷一遍：两颗顶栏
+  // 按钮、「支持」菜单里的工作台项、侧栏每一行的 ⋮。
+  function relabelUI() {
     renderThemeButton();
+    renderLangButton();
+    replaceHeaderButtons();
+    var label = workbenchLabel();
+    var workbenchItem = document.querySelector("[data-gtasks-workbench]");
+    if (workbenchItem) {
+      workbenchItem.setAttribute("aria-label", label);
+      workbenchItem.setAttribute("title", label);
+      var text = workbenchItem.querySelector(".aqdrmf-rymPhb-fpDzbe-fmcmS");
+      if (text) text.textContent = label;
+    }
+    var rowMenus = document.querySelectorAll("[data-gtasks-rowmenu]");
+    for (var index = 0; index < rowMenus.length; index++) {
+      rowMenus[index].title = listOptionsTitle();
+      rowMenus[index].setAttribute("aria-label", listOptionsTitle());
+    }
   }
 
   function closeMenu(menu) {
@@ -811,6 +958,10 @@
   }
 
   var WORKBENCH_LABEL = "GTasks 工作台";
+
+  function workbenchLabel() {
+    return tt("app.workbenchTitle", WORKBENCH_LABEL);
+  }
 
   function menuItems(menu) {
     return menu.querySelectorAll('li[role="menuitem"]');
@@ -838,11 +989,12 @@
     }
     item.removeAttribute("jslog");
     item.setAttribute("data-gtasks-workbench", "1");
-    item.setAttribute("aria-label", WORKBENCH_LABEL);
-    item.setAttribute("title", WORKBENCH_LABEL);
+    var text = workbenchLabel();
+    item.setAttribute("aria-label", text);
+    item.setAttribute("title", text);
     var label = item.querySelector(".aqdrmf-rymPhb-fpDzbe-fmcmS");
-    if (label) label.textContent = WORKBENCH_LABEL;
-    else item.textContent = WORKBENCH_LABEL;
+    if (label) label.textContent = text;
+    else item.textContent = text;
     item.addEventListener("click", function (event) {
       event.stopPropagation();
       event.preventDefault();
@@ -1019,6 +1171,7 @@
     if (observer) observer.disconnect();
     var current = rowForList(listId);
     if (current) current.removeAttribute("data-gtasks-tempshow");
+    markInternalRpc(2500);
     // checkbox 的 checked 属性和真实显隐并不同步（Google 自己维护），以「列还在
     // 不在」为准：列还在说明是我们临时显示的、用户中途没动过，再点一次藏回去；
     // 列已经没了（用户手动藏了 / 清单被删了）就别再多点那一下。
@@ -1055,6 +1208,7 @@
     });
     observer.observe(document.body, { childList: true, subtree: true });
     row.setAttribute("data-gtasks-tempshow", "1");
+    markInternalRpc(2500);
     row.click();
     var tries = 0;
     var timer = setInterval(function () {
@@ -1090,7 +1244,8 @@
     button.setAttribute("data-gtasks-rowmenu", "1");
     button.setAttribute("role", "button");
     button.setAttribute("tabindex", "-1");
-    button.title = "列表选项";
+    button.title = listOptionsTitle();
+    button.setAttribute("aria-label", button.title);
     button.innerHTML = UI_MORE_ICON;
     for (var index = 0; index < ROW_MENU_EVENTS.length; index++) {
       button.addEventListener(ROW_MENU_EVENTS[index], swallowRowEvent);
@@ -1224,7 +1379,7 @@
       '<div style="display:flex;align-items:center;gap:10px">' +
       '<span style="width:15px;height:15px;border-radius:50%;border:2px solid ' + palette.accent +
       ';border-top-color:transparent;animation:gtasks-splash-spin .8s linear infinite"></span>' +
-      '<span>正在载入 Google Tasks…</span></div>';
+      '<span>' + tt("session.splash", "正在载入 Google Tasks…") + '</span></div>';
     (document.head || document.documentElement).appendChild(style);
     (document.body || document.documentElement).appendChild(splash);
     watchSplash();
@@ -1235,7 +1390,7 @@
     // 遮罩要抢在页面自己的首帧之前，所以放在最前面，且不受「已安装」短路影响。
     installSplash();
     if (window.__gtaskUIInstalled) {
-      renderThemeButton();
+      relabelUI();
       decorateRows(document);
       return;
     }
@@ -1244,6 +1399,8 @@
       installUIStyles();
       installContextMenu();
       installHeaderButtons();
+      scheduleHeaderPlacement();
+      try { window.addEventListener("resize", replaceHeaderButtons); } catch (ignored) {}
       decorateRows(document);
       decorateSupportMenu(document.querySelector(SUPPORT_MENU_SELECTOR));
       observeUI();
@@ -1268,6 +1425,19 @@
   }
 
   // Go 侧在页面 ready 后把当前主题推下来，按钮图标随之刷新。
+  // Go 在页面 ready 后以及每次切语言时推一整份词表下来（与主窗口同一份结构）。
+  api.setI18n = function (payload) {
+    if (!payload || typeof payload !== "object") return;
+    window.__gtasksI18n = {
+      lang: payload.lang || "zh",
+      messages: payload.messages || {},
+      items: payload.items || []
+    };
+    // 缓存给下次启动的遮罩用（它跑在 document-start，等不到 Go 回话）。
+    try { localStorage.setItem(UI_I18N_KEY, JSON.stringify(window.__gtasksI18n)); } catch (ignored) {}
+    relabelUI();
+  };
+
   api.setThemeMode = function (mode, dark) {
     window.__gtaskThemeMode = UI_MODES.indexOf(mode) >= 0 ? mode : "system";
     // 存一份给下次启动的启动遮罩用：它跑在 document-start，等不到 Go 回话。

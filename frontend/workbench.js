@@ -13,6 +13,49 @@ let historyNoted = false;
 // ring, and one <li> per capture with its JSON bodies gets heavy quickly.
 const MAX_RENDERED = 400;
 
+/* ------------------------------------------------------------------ i18n */
+// 两段 hint 里含 <code>/<strong>，走 innerHTML 整体替换（data-i18n 只能改纯文本）。
+// 兜底中文就是 HTML 里原本那份，切语言时先存下来，之后按键取。
+const HINT_ZH = {};
+for (const id of ["sniffHint", "opsHint"]) {
+  const node = document.getElementById(id);
+  if (node) HINT_ZH[id] = node.innerHTML;
+}
+
+function applyHints() {
+  for (const [id, fallback] of Object.entries(HINT_ZH)) {
+    const node = document.getElementById(id);
+    if (node) node.innerHTML = t(`wb.html.${id}`, fallback);
+  }
+}
+
+// 两个 dump 的初始占位文案跟着语言走；一旦被探测结果 / 配置填上就不再动它。
+const DUMP_IDS = ["sessionDump", "configDump"];
+for (const id of DUMP_IDS) {
+  const node = document.getElementById(id);
+  if (node) node.dataset.gtasksPlaceholder = "1";
+}
+
+function applyDumpPlaceholders() {
+  for (const id of DUMP_IDS) {
+    const node = $(id);
+    if (node && node.dataset.gtasksPlaceholder === "1") node.textContent = t("wb.html.notFetched", "尚未获取");
+  }
+}
+
+function fillDump(id, text) {
+  const node = $(id);
+  if (!node) return;
+  delete node.dataset.gtasksPlaceholder;
+  node.textContent = text;
+}
+
+function renderLangButton() {
+  const button = $("btnLang");
+  if (!button) return;
+  button.title = t("main.langTitle", "语言：{label}", { label: i18nLabel(i18nLang()) });
+}
+
 /* ------------------------------------------------------------------ tabs */
 
 function switchTab(name) {
@@ -30,44 +73,44 @@ async function refreshState() {
   try {
     const state = await api("/api/state");
     $("readyDot").classList.toggle("on", !!state.ready);
-    setBadge("badgeBridge", `桥接: ${state.ready ? "就绪" : "未就绪"}`, state.ready ? "ok" : "warn");
+    setBadge("badgeBridge", t("wb.bridge", "桥接: {state}", { state: state.ready ? t("wb.ready", "就绪") : t("wb.notReady", "未就绪") }), state.ready ? "ok" : "warn");
 
     const session = state.session;
     const health = (state.watcher && state.watcher.health) || "";
     const expired = !!(state.watcher && state.watcher.expired);
     if (session) {
-      const note = expired ? "会话失效" : health && health !== "ok" ? health : "";
+      const note = expired ? t("wb.expired", "会话失效") : health && health !== "ok" ? health : "";
       setBadge(
         "badgeLogin",
-        `登录: ${session.loggedIn ? "是" : "否"}${note ? `（${note}）` : ""}`,
+        t("wb.login", "登录: {state}", { state: (session.loggedIn ? t("wb.yes", "是") : t("wb.no", "否")) + (note ? `（${note}）` : "") }),
         session.loggedIn ? (expired ? "warn" : "ok") : "bad",
       );
       setBadge("badgeToken", `at: ${session.at ? session.at.slice(0, 12) + "…" : "—"}`, session.at ? "ok" : "bad");
       setBadge("badgeBuild", `bl: ${session.bl || "—"}`, session.bl ? "ok" : "");
     } else {
-      setBadge("badgeLogin", "登录: 未知", "");
+      setBadge("badgeLogin", t("wb.loginUnknown", "登录: 未知"), "");
       setBadge("badgeToken", "at: —", "");
       setBadge("badgeBuild", "bl: —", "");
     }
-    setBadge("badgeCount", `抓包: ${state.sniffed}${state.dropped ? ` (丢弃 ${state.dropped})` : ""}`, state.sniffed ? "ok" : "");
-    setBadge("badgeOps", `操作: ${state.opsReady}/${state.opsTotal}`, state.opsReady ? "ok" : "");
+    setBadge("badgeCount", t("wb.sniffBadge", "抓包: {count}{drop}", { count: state.sniffed, drop: state.dropped ? t("wb.dropped", " (丢弃 {count})", { count: state.dropped }) : "" }), state.sniffed ? "ok" : "");
+    setBadge("badgeOps", t("wb.opsBadge", "操作: {ready}/{total}", { ready: state.opsReady, total: state.opsTotal }), state.opsReady ? "ok" : "");
 
-    $("btnShowSession").textContent = state.sessionWindowVisible ? "显示会话窗口 ✓" : "显示会话窗口";
+    $("btnShowSession").textContent = state.sessionWindowVisible ? t("wb.showSessionChecked", "显示会话窗口 ✓") : t("wb.showSession", "显示会话窗口");
     $("chkAutoManage").checked = !!state.autoManage;
     $("chkAutoSniff").checked = state.watcher ? true : $("chkAutoSniff").checked;
   } catch (error) {
-    setBadge("badgeBridge", `桥接: ${error.message}`, "bad");
+    setBadge("badgeBridge", t("wb.bridgeErr", "桥接: {message}", { message: error.message }), "bad");
   }
 }
 
 async function probe() {
   try {
     const session = await api("/api/probe", { method: "POST" });
-    $("sessionDump").textContent = pretty(session);
-    toast(`会话就绪 · ${session.loggedIn ? "已登录" : "未登录"} · ${session.origin}`);
+    fillDump("sessionDump", pretty(session));
+    toast(t("wb.sessionReady", "会话就绪 · {login} · {origin}", { login: session.loggedIn ? t("wb.loggedIn", "已登录") : t("wb.notLogged", "未登录"), origin: session.origin }));
     await refreshState();
   } catch (error) {
-    $("sessionDump").textContent = `探测失败: ${error.message}`;
+    fillDump("sessionDump", t("wb.probeFailed", "探测失败: {message}", { message: error.message }));
     toast(error.message, true);
   }
 }
@@ -75,8 +118,8 @@ async function probe() {
 async function loadConfig() {
   try {
     const config = await api("/api/config");
-    $("configDump").textContent = pretty(config);
-    $("opsPath").textContent = config.operations || "(内存)";
+    fillDump("configDump", pretty(config));
+    $("opsPath").textContent = config.operations || t("wb.inMemory", "(内存)");
   } catch {
     /* 非关键路径 */
   }
@@ -100,7 +143,7 @@ async function setAutoFlags() {
         autoSniff: $("chkAutoSniff").checked,
       },
     });
-    toast(`自动隐藏会话: ${$("chkAutoManage").checked ? "开" : "关"} · 自动抓包: ${$("chkAutoSniff").checked ? "开" : "关"}`);
+    toast(t("wb.autoToast", "自动隐藏会话: {a} · 自动抓包: {b}", { a: $("chkAutoManage").checked ? t("wb.on", "开") : t("wb.off", "关"), b: $("chkAutoSniff").checked ? t("wb.on", "开") : t("wb.off", "关") }));
   } catch (error) {
     toast(error.message, true);
   }
@@ -111,7 +154,7 @@ async function setAutoFlags() {
 async function setSniff(on) {
   try {
     const control = await api("/api/sniff", { method: "POST", body: { on } });
-    toast(control.sniffing ? "抓包已开启，去会话窗口里操作吧" : "抓包已停止");
+    toast(control.sniffing ? t("wb.sniffOn", "抓包已开启，去会话窗口里操作吧") : t("wb.sniffOff", "抓包已停止"));
     await pollSniff();
   } catch (error) {
     toast(error.message, true);
@@ -134,7 +177,7 @@ async function pollSniff() {
     visible = entries.slice(-MAX_RENDERED);
     if (!historyNoted) {
       historyNoted = true;
-      toast(`历史抓包较多，仅显示最近 ${MAX_RENDERED} 条（完整内容用「导出」）`);
+      toast(t("wb.sniffTruncated", "历史抓包较多，仅显示最近 {count} 条（完整内容用「导出」）", { count: MAX_RENDERED }));
     }
   }
   for (const entry of visible) {
@@ -142,7 +185,7 @@ async function pollSniff() {
     sniffCursor = entry.seq;
   }
   trimSniffList();
-  setBadge("badgeCount", `抓包: ${payload.seq}${payload.dropped ? ` (丢弃 ${payload.dropped})` : ""}`, "ok");
+  setBadge("badgeCount", t("wb.sniffBadge", "抓包: {count}{drop}", { count: payload.seq, drop: payload.dropped ? t("wb.dropped", " (丢弃 {count})", { count: payload.dropped }) : "" }), "ok");
 }
 
 // Newest entries are prepended, so the oldest ones sit at the bottom.
@@ -159,13 +202,67 @@ function parseEntry(entry) {
   }
 }
 
+// 连续的「内部同步」抓包（侧栏列表选项为未勾选清单临时显隐产生的 show/hide
+// RPC）折叠成一行：它们是桌面化改造的副作用，不是逆向时关心的操作；内容不丢，
+// 点开折叠行每条原始记录都在。
+let internalGroup = null;
+
 function appendEntry(entry) {
   const detail = parseEntry(entry);
+  if (detail && detail.internal === true) {
+    if (internalGroup && internalGroup.isConnected) {
+      extendInternalGroup(internalGroup, entry, detail);
+      return;
+    }
+    internalGroup = makeInternalGroup(entry, detail);
+    $("sniffList").prepend(internalGroup);
+    return;
+  }
+  internalGroup = null;
+  $("sniffList").prepend(makeEntryItem(entry, detail));
+}
+
+function makeInternalGroup(entry, detail) {
+  const item = document.createElement("li");
+  item.className = "sniff-item sniff-group";
+  item.dataset.seq = String(entry.seq);
+  item._entries = [];
+  const head = document.createElement("div");
+  head.className = "sniff-head";
+  head.innerHTML =
+    `<span class="sniff-time"></span><span class="sniff-ids"></span><span class="sniff-status ok"></span>`;
+  head.addEventListener("click", () => {
+    item.classList.toggle("open");
+    if (item.classList.contains("open") && !item._rendered) {
+      item._rendered = true;
+      const body = item.querySelector(".sniff-body");
+      for (const child of item._entries) body.append(makeEntryItem(child.entry, child.detail));
+    }
+  });
+  const body = document.createElement("div");
+  body.className = "sniff-body";
+  item.append(head, body);
+  extendInternalGroup(item, entry, detail);
+  return item;
+}
+
+function extendInternalGroup(item, entry, detail) {
+  item._entries.push({ entry, detail });
+  const first = item._entries[0];
+  const last = item._entries[item._entries.length - 1];
+  const stamp = new Date(detail.t || entry.at || Date.now()).toLocaleTimeString("zh-CN", { hour12: false });
+  const head = item.querySelector(".sniff-head");
+  head.querySelector(".sniff-time").textContent = `#${first.entry.seq}…#${last.entry.seq} ${stamp}`;
+  head.querySelector(".sniff-ids").textContent = t("wb.internalGroup", "内部同步调用（临时显隐清单的副作用） ×{count}", { count: item._entries.length });
+  head.querySelector(".sniff-status").textContent = String(detail.status ?? "?");
+}
+
+function makeEntryItem(entry, detail) {
   const item = document.createElement("li");
   item.className = "sniff-item";
   item.dataset.seq = String(entry.seq);
 
-  const ids = Array.isArray(detail.rpcids) && detail.rpcids.length ? detail.rpcids.join(", ") : "(未识别)";
+  const ids = Array.isArray(detail.rpcids) && detail.rpcids.length ? detail.rpcids.join(", ") : t("wb.unknownRpc", "(未识别)");
   const status = detail.status ?? "?";
   const okStatus = Number(status) >= 200 && Number(status) < 300;
   const stamp = new Date(detail.t || entry.at || Date.now()).toLocaleTimeString("zh-CN", { hour12: false });
@@ -186,19 +283,19 @@ function appendEntry(entry) {
   meta.className = "hint";
   meta.textContent = `${detail.via || "?"} · ${detail.url || ""}`;
 
-  body.append(meta, section("f.req（请求参数）", detail.freq !== undefined ? pretty(detail.freq) : detail.freqRaw || "(无)"));
-  body.append(section("原始响应", detail.response || "(无)"));
+  body.append(meta, section(t("wb.sectionReq", "f.req（请求参数）"), detail.freq !== undefined ? pretty(detail.freq) : detail.freqRaw || t("wb.none", "(无)")));
+  body.append(section(t("wb.sectionResp", "原始响应"), detail.response || t("wb.none", "(无)")));
 
   const tools = document.createElement("div");
   tools.className = "sniff-tools";
 
   const decodeBtn = document.createElement("button");
-  decodeBtn.textContent = "解码响应";
+  decodeBtn.textContent = t("wb.decode", "解码响应");
   decodeBtn.addEventListener("click", async (event) => {
     event.stopPropagation();
     try {
       const decoded = await api("/api/decode", { method: "POST", body: { raw: detail.response || "" } });
-      body.append(section("解码结果", pretty(decoded.responses)));
+      body.append(section(t("wb.sectionDecoded", "解码结果"), pretty(decoded.responses)));
       item.classList.add("open");
     } catch (error) {
       toast(error.message, true);
@@ -207,7 +304,7 @@ function appendEntry(entry) {
 
   const codegenBtn = document.createElement("button");
   codegenBtn.className = "primary";
-  codegenBtn.textContent = "生成代码 / 固化为操作";
+  codegenBtn.textContent = t("wb.codegen", "生成代码 / 固化为操作");
   codegenBtn.addEventListener("click", async (event) => {
     event.stopPropagation();
     await selectCapture(entry, detail);
@@ -217,7 +314,7 @@ function appendEntry(entry) {
   body.append(tools);
 
   item.append(head, body);
-  $("sniffList").prepend(item);
+  return item;
 }
 
 function section(title, text) {
@@ -241,7 +338,7 @@ async function exportSniff() {
     link.download = "gtasks-captures.jsonl";
     link.click();
     URL.revokeObjectURL(url);
-    toast("已导出当前内存中的抓包记录");
+    toast(t("wb.exported", "已导出当前内存中的抓包记录"));
   } catch (error) {
     toast(error.message, true);
   }
@@ -258,7 +355,7 @@ async function selectCapture(entry, detail) {
   switchTab("sniff");
   $("codegenPanel").hidden = false;
   $("codegenMeta").textContent =
-    `#${entry.seq} · ${(detail.rpcids || []).join(", ") || "(未识别)"} · HTTP ${detail.status ?? "?"}`;
+    `#${entry.seq} · ${(detail.rpcids || []).join(", ") || t("wb.unknownRpc", "(未识别)")} · HTTP ${detail.status ?? "?"}`;
 
   try {
     const generated = await api("/api/codegen", { method: "POST", body: { entry: entry.raw } });
@@ -272,7 +369,7 @@ async function selectCapture(entry, detail) {
     }
   } catch (error) {
     $("codegenSteps").value = "";
-    $("codegenGo").textContent = `生成失败: ${error.message}`;
+    $("codegenGo").textContent = t("wb.codegenFailed", "生成失败: {message}", { message: error.message });
   }
   await loadOps();
   $("codegenPanel").scrollIntoView({ behavior: "smooth", block: "nearest" });
@@ -281,19 +378,19 @@ async function selectCapture(entry, detail) {
 async function saveAsOperation() {
   const op = $("selectOp").value;
   if (!op) {
-    toast("请先选择要固化的操作", true);
+    toast(t("wb.pickOpFirst", "请先选择要固化的操作"), true);
     return;
   }
   let steps;
   try {
     steps = JSON.parse($("codegenSteps").value);
   } catch (error) {
-    toast(`steps 不是合法 JSON: ${error.message}`, true);
+    toast(t("wb.stepsInvalid", "steps 不是合法 JSON: {message}", { message: error.message }), true);
     return;
   }
   try {
     await api("/api/ops", { method: "POST", body: { op, steps } });
-    toast(`已保存 ${op}（${steps.length} 个 RPC）`);
+    toast(t("wb.opSaved", "已保存 {op}（{count} 个 RPC）", { op, count: steps.length }));
     await loadOps();
     await refreshState();
   } catch (error) {
@@ -310,7 +407,7 @@ async function loadOps() {
     syncOps = new Set(payload.sync || []);
     renderOps();
     renderOpSelects();
-    setBadge("badgeOps", `操作: ${payload.ready}/${payload.total}`, payload.ready ? "ok" : "");
+    setBadge("badgeOps", t("wb.opsBadge", "操作: {ready}/{total}", { ready: payload.ready, total: payload.total }), payload.ready ? "ok" : "");
   } catch (error) {
     toast(error.message, true);
   }
@@ -343,7 +440,7 @@ function renderOps() {
     const rpcids = document.createElement("span");
     rpcids.className = "op-rpcids";
     rpcids.textContent = (definition.steps || []).map((step) => step.rpcid).join(", ")
-      || (syncOps.has(definition.op) ? "SOV0tb（同步通道）" : "");
+      || (syncOps.has(definition.op) ? t("wb.syncChannel", "SOV0tb（同步通道）") : "");
     head.append(state, label, key, rpcids);
     head.addEventListener("click", () => item.classList.toggle("open"));
 
@@ -358,7 +455,7 @@ function renderOps() {
     body.append(section("steps", JSON.stringify(definition.steps || [], null, 2)));
 
     const runBtn = document.createElement("button");
-    runBtn.textContent = "填入执行面板";
+    runBtn.textContent = t("wb.fillExec", "填入执行面板");
     runBtn.addEventListener("click", (event) => {
       event.stopPropagation();
       $("execOp").value = definition.op;
@@ -382,9 +479,9 @@ function renderOpSelects() {
   execSelect.innerHTML = "";
 
   const pending = document.createElement("optgroup");
-  pending.label = "待发现";
+  pending.label = t("wb.pending", "待发现");
   const ready = document.createElement("optgroup");
-  ready.label = "已配置";
+  ready.label = t("wb.configured", "已配置");
 
   for (const definition of operations) {
     const isReady = opExecutable(definition);
@@ -409,15 +506,15 @@ async function executeOperation() {
   try {
     params = JSON.parse($("execParams").value || "{}");
   } catch (error) {
-    toast(`参数不是合法 JSON: ${error.message}`, true);
+    toast(t("wb.paramsInvalid", "参数不是合法 JSON: {message}", { message: error.message }), true);
     return;
   }
   try {
     const payload = await api("/api/ops/execute", { method: "POST", body: { op, params } });
     $("execOutput").value = pretty(payload);
-    toast(payload.error ? `已返回，但有错误: ${payload.error}` : `${op} 执行完成`, !!payload.error);
+    toast(payload.error ? t("wb.execError", "已返回，但有错误: {message}", { message: payload.error }) : t("wb.execDone", "{op} 执行完成", { op }), !!payload.error);
   } catch (error) {
-    $("execOutput").value = `执行失败: ${error.message}`;
+    $("execOutput").value = t("wb.execFailed", "执行失败: {message}", { message: error.message });
     toast(error.message, true);
   }
 }
@@ -437,14 +534,14 @@ function parseArgs(text, count) {
 async function sendCall() {
   const rpcids = $("inputRpcids").value.split(",").map((part) => part.trim()).filter(Boolean);
   if (rpcids.length === 0) {
-    toast("请先填写 rpcids", true);
+    toast(t("wb.needRpcids", "请先填写 rpcids"), true);
     return;
   }
   let args;
   try {
     args = parseArgs($("inputArgs").value, rpcids.length);
   } catch (error) {
-    toast(`参数 JSON 解析失败: ${error.message}`, true);
+    toast(t("wb.argsInvalid", "参数 JSON 解析失败: {message}", { message: error.message }), true);
     return;
   }
 
@@ -457,10 +554,10 @@ async function sendCall() {
   try {
     const payload = await api("/api/call", { method: "POST", body: { rpcids, args, opts } });
     $("outputRaw").value = pretty(payload);
-    if (payload.decodeError) toast(`已返回，但解码失败: ${payload.decodeError}`, true);
-    else toast("调用完成");
+    if (payload.decodeError) toast(t("wb.decodeFailed", "已返回，但解码失败: {message}", { message: payload.decodeError }), true);
+    else toast(t("wb.callDone", "调用完成"));
   } catch (error) {
-    $("outputRaw").value = `调用失败: ${error.message}`;
+    $("outputRaw").value = t("wb.callFailed", "调用失败: {message}", { message: error.message });
     toast(error.message, true);
   }
 }
@@ -468,7 +565,7 @@ async function sendCall() {
 async function decodeRaw() {
   const raw = $("outputRaw").value;
   if (!raw.trim()) {
-    toast("没有可解码的内容", true);
+    toast(t("wb.nothingToDecode", "没有可解码的内容"), true);
     return;
   }
   let body = raw;
@@ -491,9 +588,9 @@ async function decodeRaw() {
 async function copyText(text, label) {
   try {
     await navigator.clipboard.writeText(text);
-    toast(`已复制${label}`);
+    toast(t("wb.copied", "已复制{label}", { label }));
   } catch {
-    toast("复制失败，请手动选择文本", true);
+    toast(t("wb.copyFailed", "复制失败，请手动选择文本"), true);
   }
 }
 
@@ -502,6 +599,11 @@ function bindUI() {
     node.addEventListener("click", () => switchTab(node.dataset.tab));
   });
 
+  $("btnLang").addEventListener("click", (event) => {
+    openLangMenu(event.currentTarget).catch((error) =>
+      toast(t("main.toastLangMenuFailed", "语言菜单打开失败：{message}", { message: error.message }), true),
+    );
+  });
   $("btnProbe").addEventListener("click", probe);
   $("btnShowSession").addEventListener("click", () => sessionAction("show"));
   $("btnHideSession").addEventListener("click", () => sessionAction("hide"));
@@ -516,7 +618,7 @@ function bindUI() {
     await api("/api/sniff/clear", { method: "POST" });
     $("sniffList").innerHTML = "";
     sniffCursor = 0;
-    toast("已清空内存中的抓包记录（磁盘日志保留）");
+    toast(t("wb.cleared", "已清空内存中的抓包记录（磁盘日志保留）"));
     await refreshState();
   });
 
@@ -533,15 +635,34 @@ function bindUI() {
   $("btnCall").addEventListener("click", sendCall);
   $("btnDecode").addEventListener("click", decodeRaw);
 
-  $("btnCopySession").addEventListener("click", () => copyText($("sessionDump").textContent, "会话信息"));
-  $("btnCopyConfig").addEventListener("click", () => copyText($("configDump").textContent, "路径配置"));
+  $("btnCopySession").addEventListener("click", () => copyText($("sessionDump").textContent, t("wb.sessionInfo", "会话信息")));
+  $("btnCopyConfig").addEventListener("click", () => copyText($("configDump").textContent, t("wb.pathConfig", "路径配置")));
 }
 
-bindUI();
-refreshState();
-probe();
-loadConfig();
-loadOps();
-timers.push(setInterval(refreshState, 4000));
-timers.push(setInterval(pollSniff, 1200));
+async function init() {
+  await loadI18n();
+  document.title = t("app.workbenchTitle", "GTasks 工作台");
+  applyHints();
+  applyDumpPlaceholders();
+  renderLangButton();
+  bindUI();
+  // 切语言后：静态文案 applyI18n 自己刷，徽标 / 提示 / 列表这些动态内容在这里补。
+  onI18n(() => {
+    document.title = t("app.workbenchTitle", "GTasks 工作台");
+    applyHints();
+    applyDumpPlaceholders();
+    renderLangButton();
+    refreshState();
+    loadConfig();
+    loadOps();
+  });
+  refreshState();
+  probe();
+  loadConfig();
+  loadOps();
+  timers.push(setInterval(refreshState, 4000));
+  timers.push(setInterval(pollSniff, 1200));
+}
+
+init();
 window.addEventListener("beforeunload", () => timers.forEach(clearInterval));

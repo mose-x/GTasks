@@ -23,6 +23,7 @@ import (
 	"gtasks/internal/api"
 	"gtasks/internal/batchexec"
 	"gtasks/internal/bridge"
+	"gtasks/internal/i18n"
 	"gtasks/internal/session"
 	"gtasks/internal/tasks"
 	"gtasks/internal/theme"
@@ -45,6 +46,7 @@ const (
 	captureRingLimit  = 3000
 	contextMenuID     = "gtasks-context"
 	themeMenuID       = "gtasks-theme"
+	langMenuID        = "gtasks-lang"
 
 	// 窗口标题统一用产品名，不再暴露「Google 会话」这类内部叫法。
 	windowTitle          = "GTasks"
@@ -75,6 +77,8 @@ func main() {
 	}
 
 	themeManager := theme.Load(themePath(dataDir))
+	// 词表打包在二进制里（internal/i18n/locales/*.toml），加语言只需加 toml。
+	i18nManager := i18n.LoadManager(i18n.Load(), langPath(dataDir))
 
 	registry := loadRegistry(dataDir)
 	client := batchexec.NewClient(sessionBridge)
@@ -89,6 +93,7 @@ func main() {
 		Service:  service,
 		Watcher:  watcher,
 		Theme:    themeManager,
+		I18n:     i18nManager,
 		DataDir:  dataDir,
 	})
 
@@ -193,7 +198,7 @@ func main() {
 	newWorkbenchWindow := func() *application.WebviewWindow {
 		win := app.Window.NewWithOptions(application.WebviewWindowOptions{
 			Name:      workbenchName,
-			Title:     workbenchWindowTitle,
+			Title:     i18nManager.T("app.workbenchTitle", workbenchWindowTitle),
 			URL:       "/workbench.html",
 			Width:     1240,
 			Height:    820,
@@ -229,11 +234,32 @@ func main() {
 		win.Focus()
 	}
 
-	newContextMenu(lookupWindow)
+	relabelContext := newContextMenu(lookupWindow, i18nManager)
+
+	langPicker := newLangMenu(i18nManager.Bundle(), func(code string) { i18nManager.Set(code) })
+	apiHandler.SetLangMenuOpener(func(source string, x, y int) {
+		win, name := menuWindow(lookupWindow, source)
+		langPicker.open(win, name, i18nManager.Lang(), x, y)
+	})
+
+	// 切语言后把新词表推给三个窗口：主窗口和工作台走各自的 applyI18n，会话页由
+	// bootstrap 改注入的按钮 / 菜单文案；原生右键菜单和工作台标题跟着换。
+	i18nManager.OnChange(func(string) {
+		payload := string(i18nManager.Payload())
+		script := fmt.Sprintf("window.gtasksApplyI18n&&window.gtasksApplyI18n(%s);", payload)
+		mainWindow.ExecJS(script)
+		if workbench := lookupWindow(workbenchName); workbench != nil {
+			workbench.ExecJS(script)
+			workbench.SetTitle(i18nManager.T("app.workbenchTitle", workbenchWindowTitle))
+		}
+		sessionWindow.ExecJS(fmt.Sprintf("window.__gtask&&window.__gtask.setI18n(%s);", payload))
+		relabelContext()
+	})
 
 	themePicker := newThemeMenu(func(mode theme.Mode) { themeManager.Set(mode) })
-	apiHandler.SetThemeMenuOpener(func(x, y int) {
-		themePicker.open(lookupWindow(mainWindowName), mainWindowName, themeManager.Mode(), x, y)
+	apiHandler.SetThemeMenuOpener(func(source string, x, y int) {
+		win, name := menuWindow(lookupWindow, source)
+		themePicker.open(win, name, themeManager.Mode(), x, y)
 	})
 
 	// 主题切换后把模式推给三个窗口：主窗口和工作台改自己的 data-theme，会话页
@@ -267,6 +293,12 @@ func main() {
 		case "openThemeMenu":
 			x, y := commandPoint(args)
 			themePicker.open(sessionWindow, sessionWindowName, themeManager.Mode(), x, y)
+		case "openLangMenu":
+			x, y := commandPoint(args)
+			langPicker.open(sessionWindow, sessionWindowName, i18nManager.Lang(), x, y)
+		case "getI18n":
+			sessionWindow.ExecJS(fmt.Sprintf("window.__gtask&&window.__gtask.setI18n(%s);",
+				string(i18nManager.Payload())))
 		case "reloadForTheme":
 			// 页面报告 prefers-color-scheme 没跟上原生外观（个别 WebView 版本
 			// 不同步窗口外观）才走到这里；限流防止页面反复回报时无限重载。
@@ -290,6 +322,9 @@ func main() {
 		mode := themeManager.Mode()
 		sessionWindow.ExecJS(fmt.Sprintf("window.__gtask&&window.__gtask.setThemeMode(%q,%t);",
 			string(mode), theme.EffectiveDark(mode)))
+		// 页面每次加载完都补一次词表，保证注入按钮的文案和当前语言同步。
+		sessionWindow.ExecJS(fmt.Sprintf("window.__gtask&&window.__gtask.setI18n(%s);",
+			string(i18nManager.Payload())))
 	})
 
 	// Show the login window only while it is actually needed.
@@ -374,17 +409,29 @@ func guardLocal(handler http.Handler) http.Handler {
 	})
 }
 
-// newContextMenu 注册全局右键菜单。WebKit 的默认菜单带「前进/后退」，对这个
-// 单页应用没意义，页面侧已经 preventDefault 掉并改弹这份：保留返回与重新加载，
-// 编辑类操作交给原生 role。目标窗口由 ContextMenuData 携带的窗口名决定。
-func newContextMenu(resolve func(string) *application.WebviewWindow) *application.ContextMenu {
+// newContextMenu 注册全局右键菜单，返回一个换语言时重贴标签的回调。WebKit 的
+// 默认菜单带「前进/后退」，对这个单页应用没意义，页面侧已经 preventDefault 掉
+// 并改弹这份：保留返回与重新加载，编辑类操作交给原生 role。目标窗口由
+// ContextMenuData 携带的窗口名决定。
+func newContextMenu(resolve func(string) *application.WebviewWindow, manager *i18n.Manager) func() {
 	menu := application.NewContextMenu(contextMenuID)
-	menu.Add("返回").OnClick(func(ctx *application.Context) {
+	type contextEntry struct {
+		item     *application.MenuItem
+		key      string
+		fallback string
+	}
+	var entries []contextEntry
+	add := func(key, fallback string) *application.MenuItem {
+		item := menu.Add(manager.T(key, fallback))
+		entries = append(entries, contextEntry{item: item, key: key, fallback: fallback})
+		return item
+	}
+	add("menu.back", "返回").OnClick(func(ctx *application.Context) {
 		if win := resolve(ctx.ContextMenuData()); win != nil {
 			win.ExecJS("if (history.length > 1) history.back();")
 		}
 	})
-	menu.Add("重新加载").OnClick(func(ctx *application.Context) {
+	add("menu.reload", "重新加载").OnClick(func(ctx *application.Context) {
 		if win := resolve(ctx.ContextMenuData()); win != nil {
 			win.Reload()
 		}
@@ -392,17 +439,66 @@ func newContextMenu(resolve func(string) *application.WebviewWindow) *applicatio
 	menu.AddSeparator()
 	// 编辑类操作走原生 role（作用于 webview 的第一响应者），标签与快捷键
 	// 自己给，免得系统没本地化时冒出英文。
-	menu.Add("剪切").SetRole(application.Cut).SetAccelerator("CmdOrCtrl+x")
-	menu.Add("复制").SetRole(application.Copy).SetAccelerator("CmdOrCtrl+c")
-	menu.Add("粘贴").SetRole(application.Paste).SetAccelerator("CmdOrCtrl+v")
-	menu.Add("全选").SetRole(application.SelectAll).SetAccelerator("CmdOrCtrl+a")
+	add("menu.cut", "剪切").SetRole(application.Cut).SetAccelerator("CmdOrCtrl+x")
+	add("menu.copy", "复制").SetRole(application.Copy).SetAccelerator("CmdOrCtrl+c")
+	add("menu.paste", "粘贴").SetRole(application.Paste).SetAccelerator("CmdOrCtrl+v")
+	add("menu.selectAll", "全选").SetRole(application.SelectAll).SetAccelerator("CmdOrCtrl+a")
 	menu.AddSeparator()
-	menu.Add("检查元素").OnClick(func(ctx *application.Context) {
+	add("menu.inspect", "检查元素").OnClick(func(ctx *application.Context) {
 		if win := resolve(ctx.ContextMenuData()); win != nil {
 			win.OpenDevTools()
 		}
 	})
-	return menu
+	return func() {
+		for _, entry := range entries {
+			entry.item.SetLabel(manager.T(entry.key, entry.fallback))
+		}
+		menu.Update()
+	}
+}
+
+// langMenu 是语言单选菜单：菜单项完全由打包进来的词表决定，加一门语言只要
+// 加一个 toml 文件，这里不用改。
+type langMenu struct {
+	menu  *application.ContextMenu
+	items map[string]*application.MenuItem
+}
+
+func newLangMenu(bundle *i18n.Bundle, apply func(string)) *langMenu {
+	result := &langMenu{menu: application.NewContextMenu(langMenuID), items: map[string]*application.MenuItem{}}
+	for _, code := range bundle.Codes() {
+		target := code
+		result.items[code] = result.menu.AddRadio(bundle.Label(code), false).
+			OnClick(func(*application.Context) { apply(target) })
+	}
+	return result
+}
+
+// open 先把勾选同步成当前语言，再在 (x, y) 处弹出菜单。
+func (l *langMenu) open(win *application.WebviewWindow, windowName string, lang string, x, y int) {
+	if win == nil || len(l.items) == 0 {
+		return
+	}
+	for code, item := range l.items {
+		item.SetChecked(code == lang)
+	}
+	win.OpenContextMenu(&application.ContextMenuData{
+		Id:   langMenuID,
+		X:    x,
+		Y:    y,
+		Data: windowName,
+	})
+}
+
+// menuWindow 把菜单请求的来源窗口名映射成窗口对象：工作台里的按钮要把菜单弹在
+// 工作台自己上面（坐标是它自己 webview 的 CSS 像素），工作台没开时退回主窗口。
+func menuWindow(lookup func(string) *application.WebviewWindow, source string) (*application.WebviewWindow, string) {
+	if source == "workbench" {
+		if win := lookup(workbenchName); win != nil {
+			return win, workbenchName
+		}
+	}
+	return lookup(mainWindowName), mainWindowName
 }
 
 // commandPoint 取出页面回调携带的 webview 坐标：CSS 像素、原点左上角，
@@ -487,6 +583,14 @@ func themePath(dataDir string) string {
 		return ""
 	}
 	return filepath.Join(dataDir, "theme.txt")
+}
+
+// langPath 是界面语言的持久化位置，与主题同一个数据目录。
+func langPath(dataDir string) string {
+	if dataDir == "" {
+		return ""
+	}
+	return filepath.Join(dataDir, "lang.txt")
 }
 
 // loadRegistry reads the persisted rpcid registry, falling back to the bundled

@@ -18,6 +18,7 @@ import (
 
 	"gtasks/internal/batchexec"
 	"gtasks/internal/bridge"
+	"gtasks/internal/i18n"
 	"gtasks/internal/session"
 	"gtasks/internal/tasks"
 	"gtasks/internal/theme"
@@ -221,17 +222,40 @@ type Handler struct {
 	service  *tasks.Service
 	watcher  *session.Watcher
 	theme    *theme.Manager
+	i18n     *i18n.Manager
 	dataDir  string
 
 	mu         sync.RWMutex
 	mainWin    *application.WebviewWindow
 	sessionWin *application.WebviewWindow
 	themeMenu  ThemeMenuOpener
+	langMenu   LangMenuOpener
 }
 
 // ThemeMenuOpener 在调用方指定的 webview 坐标处弹出主题单选菜单。由 main 注入，
 // 这样前端按钮点下去弹的是原生菜单，和会话页顶栏那颗按钮行为一致。
-type ThemeMenuOpener func(x, y int)
+type ThemeMenuOpener func(source string, x, y int)
+
+// LangMenuOpener 在调用方指定的 webview 坐标处弹出语言单选菜单，菜单项由打包
+// 进来的 locales/*.toml 决定。source 是发起请求的窗口（"main" / "workbench"）：
+// 坐标是那个窗口自己 webview 里的，菜单必须弹回同一个窗口才对得上。
+type LangMenuOpener func(source string, x, y int)
+
+// menuSource 从 Referer 兜底判断请求来自哪个窗口（前端会在请求体里带 source，
+// 这里只兜住老前端 / 手工调用）。
+func menuSource(r *http.Request) string {
+	if strings.Contains(r.Referer(), "workbench.html") {
+		return "workbench"
+	}
+	return "main"
+}
+
+func resolveMenuSource(bodySource string, r *http.Request) string {
+	if bodySource == "main" || bodySource == "workbench" {
+		return bodySource
+	}
+	return menuSource(r)
+}
 
 // Deps bundles the Handler's collaborators.
 type Deps struct {
@@ -242,6 +266,7 @@ type Deps struct {
 	Service  *tasks.Service
 	Watcher  *session.Watcher
 	Theme    *theme.Manager
+	I18n     *i18n.Manager
 	DataDir  string
 }
 
@@ -255,6 +280,7 @@ func NewHandler(deps Deps) *Handler {
 		service:  deps.Service,
 		watcher:  deps.Watcher,
 		theme:    deps.Theme,
+		i18n:     deps.I18n,
 		dataDir:  deps.DataDir,
 	}
 }
@@ -271,6 +297,13 @@ func (h *Handler) BindWindows(mainWin, sessionWin *application.WebviewWindow) {
 func (h *Handler) SetThemeMenuOpener(opener ThemeMenuOpener) {
 	h.mu.Lock()
 	h.themeMenu = opener
+	h.mu.Unlock()
+}
+
+// SetLangMenuOpener 注入语言菜单的弹出实现。
+func (h *Handler) SetLangMenuOpener(opener LangMenuOpener) {
+	h.mu.Lock()
+	h.langMenu = opener
 	h.mu.Unlock()
 }
 
@@ -309,6 +342,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.handleTheme(w, r)
 	case path == "/api/theme/menu" && r.Method == http.MethodPost:
 		h.handleThemeMenu(w, r)
+	case path == "/api/i18n" && (r.Method == http.MethodGet || r.Method == http.MethodPost):
+		h.handleI18n(w, r)
+	case path == "/api/i18n/menu" && r.Method == http.MethodPost:
+		h.handleI18nMenu(w, r)
 	case path == "/api/eval" && r.Method == http.MethodPost:
 		h.handleEval(w, r)
 	case path == "/api/initdata" && r.Method == http.MethodGet:
@@ -888,14 +925,64 @@ func (h *Handler) handleThemeMenu(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var request struct {
-		X int `json:"x"`
-		Y int `json:"y"`
+		X      int    `json:"x"`
+		Y      int    `json:"y"`
+		Source string `json:"source"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 		writeError(w, http.StatusBadRequest, "请求体不是合法 JSON")
 		return
 	}
-	opener(request.X, request.Y)
+	opener(resolveMenuSource(request.Source, r), request.X, request.Y)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (h *Handler) handleI18n(w http.ResponseWriter, r *http.Request) {
+	if h.i18n == nil {
+		writeError(w, http.StatusServiceUnavailable, "i18n 未启用")
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(h.i18n.Payload())
+	case http.MethodPost:
+		var request struct {
+			Lang string `json:"lang"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			writeError(w, http.StatusBadRequest, "请求体不是合法 JSON")
+			return
+		}
+		code := strings.TrimSpace(request.Lang)
+		if !h.i18n.Bundle().Has(code) {
+			writeError(w, http.StatusBadRequest, "不支持的语言: "+code)
+			return
+		}
+		h.i18n.Set(code)
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "lang": h.i18n.Lang()})
+	}
+}
+
+func (h *Handler) handleI18nMenu(w http.ResponseWriter, r *http.Request) {
+	h.mu.RLock()
+	opener := h.langMenu
+	h.mu.RUnlock()
+	if opener == nil {
+		writeError(w, http.StatusServiceUnavailable, "语言菜单未启用")
+		return
+	}
+	var request struct {
+		X      int    `json:"x"`
+		Y      int    `json:"y"`
+		Source string `json:"source"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		writeError(w, http.StatusBadRequest, "请求体不是合法 JSON")
+		return
+	}
+	opener(resolveMenuSource(request.Source, r), request.X, request.Y)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 

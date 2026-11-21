@@ -25,7 +25,15 @@ const ICON = {
   themeLight: '<svg viewBox="0 0 24 24"><path d="M12 7c-2.76 0-5 2.24-5 5s2.24 5 5 5 5-2.24 5-5-2.24-5-5-5zM2 13h2c.55 0 1-.45 1-1s-.45-1-1-1H2c-.55 0-1 .45-1 1s.45 1 1 1zm18 0h2c.55 0 1-.45 1-1s-.45-1-1-1h-2c-.55 0-1 .45-1 1s.45 1 1 1zM11 2v2c0 .55.45 1 1 1s1-.45 1-1V2c0-.55-.45-1-1-1s-1 .45-1 1zm0 18v2c0 .55.45 1 1 1s1-.45 1-1v-2c0-.55-.45-1-1-1s-1 .45-1 1zM5.99 4.58c-.39-.39-1.03-.39-1.41 0-.39.39-.39 1.03 0 1.41l1.06 1.06c.39.39 1.03.39 1.41 0s.39-1.03 0-1.41L5.99 4.58zm12.37 12.37c-.39-.39-1.03-.39-1.41 0-.39.39-.39 1.03 0 1.41l1.06 1.06c.39.39 1.03.39 1.41 0 .39-.39.39-1.03 0-1.41l-1.06-1.06zm1.06-10.96c.39-.39.39-1.03 0-1.41-.39-.39-1.03-.39-1.41 0l-1.06 1.06c-.39.39-.39 1.03 0 1.41s1.03.39 1.41 0l1.06-1.06zM7.05 18.36c.39-.39.39-1.03 0-1.41-.39-.39-1.03-.39-1.41 0l-1.06 1.06c-.39.39-.39 1.03 0 1.41s1.03.39 1.41 0l1.06-1.06z"/></svg>',
   themeDark: '<svg viewBox="0 0 24 24"><path d="M12 3c-4.97 0-9 4.03-9 9s4.03 9 9 9 9-4.03 9-9c0-.46-.04-.92-.1-1.36-.98 1.37-2.58 2.26-4.4 2.26-2.98 0-5.4-2.42-5.4-5.4 0-1.81.89-3.42 2.26-4.4-.44-.06-.9-.1-1.36-.1z"/></svg>',
   themeAuto: '<svg viewBox="0 0 24 24"><path d="M10.85 12.65h2.3L12 9l-1.15 3.65zM20 8.69V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12 20 8.69zM14.3 16l-.7-2h-3.2l-.7 2H7.8L11 7h2l3.2 9h-1.9z"/></svg>',
+  lang: '<svg viewBox="0 0 24 24"><path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zm6.93 6h-2.95a15.65 15.65 0 0 0-1.38-3.56A8.03 8.03 0 0 1 18.92 8zM12 4.04c.83 1.2 1.48 2.53 1.91 3.96h-3.82c.43-1.43 1.08-2.76 1.91-3.96zM4.26 14C4.1 13.36 4 12.69 4 12s.1-1.36.26-2h3.38c-.08.66-.14 1.32-.14 2 0 .68.06 1.34.14 2H4.26zm.82 2h2.95c.32 1.25.78 2.45 1.38 3.56A7.987 7.987 0 0 1 5.08 16zm2.95-8H5.08a7.987 7.987 0 0 1 4.33-3.56A15.65 15.65 0 0 0 8.03 8zM12 19.96c-.83-1.2-1.48-2.53-1.91-3.96h3.82c-.43 1.43-1.08 2.76-1.91 3.96zM14.34 14H9.66c-.09-.66-.16-1.32-.16-2 0-.68.07-1.35.16-2h4.68c.09.65.16 1.32.16 2 0 .68-.07 1.34-.16 2zm.25 5.56c.6-1.11 1.06-2.31 1.38-3.56h2.95a8.03 8.03 0 0 1-4.33 3.56zM16.36 14c.08-.66.14-1.32.14-2 0-.68-.06-1.34-.14-2h3.38c.16.64.26 1.31.26 2s-.1 1.36-.26 2h-3.38z"/></svg>',
 };
+
+function renderLangButton() {
+  const button = $("btnLang");
+  if (!button) return;
+  button.innerHTML = ICON.lang;
+  button.title = t("main.langTitle", "语言：{label}", { label: i18nLabel(i18nLang()) });
+}
 
 const THEME_ICON = { light: "themeLight", dark: "themeDark", system: "themeAuto" };
 
@@ -34,12 +42,34 @@ function renderThemeButton() {
   if (!button) return;
   const mode = themeMode();
   button.innerHTML = ICON[THEME_ICON[mode]] || ICON.themeAuto;
-  button.title = `主题：${THEME_LABEL[mode]}`;
+  button.title = t("main.themeTitle", "主题：{mode}", { mode: themeLabel(mode) });
   button.classList.toggle("on", mode === "dark");
 }
 
 const VIRTUAL_STARRED = "@starred";
 const VIRTUAL_ALL = "@all";
+
+// 重复频率的取值是跟 Go 侧操作映射约定的协议值（中文），界面标签按语言取。
+const RECURRENCE_VALUES = ["不重复", "每天", "每周", "每月", "每年"];
+const RECURRENCE_KEYS = {
+  不重复: "main.repeatNone",
+  每天: "main.repeatDaily",
+  每周: "main.repeatWeekly",
+  每月: "main.repeatMonthly",
+  每年: "main.repeatYearly",
+};
+const MONTHS_EN = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const WEEKDAYS_EN = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+function recurrenceLabel(value) {
+  return t(RECURRENCE_KEYS[value] || "main.repeatNone", value);
+}
+
+// 日期格式跟网页端走：中文是「11月17日」，其它语言用词表的月名。
+function formatDay(date) {
+  if (i18nLang().startsWith("zh")) return `${date.getMonth() + 1}月${date.getDate()}日`;
+  return `${t("month." + (date.getMonth() + 1), MONTHS_EN[date.getMonth()])} ${date.getDate()}`;
+}
 
 const store = {
   demo: false,
@@ -103,8 +133,8 @@ function hideBanner() {
 }
 
 function expiredBanner() {
-  showBanner("会话已失效（cookie 或 at 被 Google 拒绝），请在 Google 会话窗口里重新登录。", [
-    { label: "打开登录窗口", onClick: () => api("/api/session", { method: "POST", body: { action: "show" } }).catch(() => {}) },
+  showBanner(t("main.bannerSession", "会话已失效（cookie 或 at 被 Google 拒绝），请在 Google 会话窗口里重新登录。"), [
+    { label: t("main.openLogin", "打开登录窗口"), onClick: () => api("/api/session", { method: "POST", body: { action: "show" } }).catch(() => {}) },
   ]);
 }
 
@@ -161,14 +191,14 @@ async function loadData() {
     renderAll();
     if (SESSION_WARMING_UP.test(error.message || "") && warmupAttempts < WARMUP_RETRIES) {
       warmupAttempts += 1;
-      showBanner("正在连接 Google 会话…");
+      showBanner(t("main.bannerConnecting", "正在连接 Google 会话…"));
       setTimeout(loadData, 900);
       return;
     }
-    showBanner(`读取失败：${error.message}`, [
-      { label: "重试", onClick: () => loadData() },
-      { label: "打开登录窗口", onClick: () => api("/api/session", { method: "POST", body: { action: "show" } }).catch(() => {}) },
-      { label: "载入演示数据", onClick: () => toggleDemo(true) },
+    showBanner(t("main.bannerLoadFailed", "读取失败：{message}", { message: error.message }), [
+      { label: t("main.retry", "重试"), onClick: () => loadData() },
+      { label: t("main.openLogin", "打开登录窗口"), onClick: () => api("/api/session", { method: "POST", body: { action: "show" } }).catch(() => {}) },
+      { label: t("main.loadDemo", "载入演示数据"), onClick: () => toggleDemo(true) },
     ]);
   }
 }
@@ -186,9 +216,9 @@ function targetListId() {
 
 function seedDemo() {
   store.lists = [
-    { id: "list-work", title: "工作", incomplete: 2, completedTotal: 1 },
-    { id: "list-personal", title: "个人", incomplete: 2, completedTotal: 0 },
-    { id: "list-shopping", title: "采购清单", incomplete: 1, completedTotal: 1 },
+    { id: "list-work", title: t("demo.listWork", "工作"), incomplete: 2, completedTotal: 1 },
+    { id: "list-personal", title: t("demo.listPersonal", "个人"), incomplete: 2, completedTotal: 0 },
+    { id: "list-shopping", title: t("demo.listShopping", "采购清单"), incomplete: 1, completedTotal: 1 },
   ];
   store.account = { id: "", email: "demo@example.com" };
   const today = new Date();
@@ -198,15 +228,15 @@ function seedDemo() {
     return d.toISOString().slice(0, 10);
   };
   store.tasks = [
-    { id: "t1", listId: "list-work", title: "回复设计评审邮件", notes: "附上最新一版的交互稿链接", starred: true, completed: false, due: { date: iso(0), time: "18:00" } },
-    { id: "t2", listId: "list-work", title: "整理逆向抓包结果", notes: "", starred: false, completed: false, due: { date: iso(1), time: "" }, recurrence: "每周" },
-    { id: "t3", listId: "list-work", title: "把 rpcid 固化进操作映射", notes: "", starred: false, completed: false, parent: "t2" },
-    { id: "t4", listId: "list-work", title: "校对像素级还原度", notes: "和 tasks.google.com 并排比对", starred: false, completed: true, completedAt: new Date(Date.now() - 2 * 86400000).toISOString(), due: { date: iso(-2), time: "" } },
+    { id: "t1", listId: "list-work", title: t("demo.t1", "回复设计评审邮件"), notes: t("demo.t1n", "附上最新一版的交互稿链接"), starred: true, completed: false, due: { date: iso(0), time: "18:00" } },
+    { id: "t2", listId: "list-work", title: t("demo.t2", "整理逆向抓包结果"), notes: "", starred: false, completed: false, due: { date: iso(1), time: "" }, recurrence: "每周" },
+    { id: "t3", listId: "list-work", title: t("demo.t3", "把 rpcid 固化进操作映射"), notes: "", starred: false, completed: false, parent: "t2" },
+    { id: "t4", listId: "list-work", title: t("demo.t4", "校对像素级还原度"), notes: t("demo.t4n", "和 tasks.google.com 并排比对"), starred: false, completed: true, completedAt: new Date(Date.now() - 2 * 86400000).toISOString(), due: { date: iso(-2), time: "" } },
     { id: "t5", listId: "list-work", title: "准备季度规划材料", notes: "", starred: true, completed: false, due: { date: iso(3), time: "10:30" } },
     { id: "t6", listId: "list-work", title: "评审 batchexecute 解码结果", notes: "", starred: false, completed: false },
     { id: "t7", listId: "list-personal", title: "预约牙医", notes: "", starred: false, completed: false, due: { date: iso(-1), time: "09:00" } },
-    { id: "t8", listId: "list-shopping", title: "咖啡豆", notes: "", starred: false, completed: false },
-    { id: "t9", listId: "list-shopping", title: "滤纸", notes: "", starred: false, completed: true, completedAt: new Date(Date.now() - 86400000).toISOString() },
+    { id: "t8", listId: "list-shopping", title: t("demo.t8", "咖啡豆"), notes: "", starred: false, completed: false },
+    { id: "t9", listId: "list-shopping", title: t("demo.t9", "滤纸"), notes: "", starred: false, completed: true, completedAt: new Date(Date.now() - 86400000).toISOString() },
   ];
 }
 
@@ -216,7 +246,7 @@ function toggleDemo(force) {
   if (store.demo) {
     hideBanner();
     seedDemo();
-    toast("演示数据已载入（本地，不会写回 Google）");
+    toast(t("main.toastDemoLoaded", "演示数据已载入（本地，不会写回 Google）"));
   } else {
     store.activeTaskId = null;
     loadData();
@@ -256,9 +286,9 @@ function orderedTasks(tasks) {
 
 function activeListTitle() {
   switch (store.activeListId) {
-    case VIRTUAL_STARRED: return "已加星标";
-    case VIRTUAL_ALL: return "所有任务";
-    default: return (store.lists.find((l) => l.id === store.activeListId) || {}).title || "所有任务";
+    case VIRTUAL_STARRED: return t("main.starred", "已加星标");
+    case VIRTUAL_ALL: return t("main.allTasks", "所有任务");
+    default: return (store.lists.find((l) => l.id === store.activeListId) || {}).title || t("main.allTasks", "所有任务");
   }
 }
 
@@ -292,24 +322,24 @@ function renderSidebar() {
   nav.append(navItem({
     id: VIRTUAL_ALL,
     icon: ICON.allTasks,
-    label: "所有任务",
+    label: t("main.allTasks", "所有任务"),
     active: store.activeListId === VIRTUAL_ALL,
   }));
   nav.append(navItem({
     id: VIRTUAL_STARRED,
     icon: ICON.star,
-    label: "已加星标",
+    label: t("main.starred", "已加星标"),
     active: store.activeListId === VIRTUAL_STARRED,
   }));
 
   const head = document.createElement("div");
   head.className = "nav-group-head";
   const headLabel = document.createElement("span");
-  headLabel.textContent = "任务列表";
+  headLabel.textContent = t("main.listsHead", "任务列表");
   const collapse = document.createElement("button");
   collapse.className = "icon-btn tiny";
   collapse.innerHTML = store.listsCollapsed ? ICON.expandMore : ICON.expandLess;
-  collapse.title = store.listsCollapsed ? "展开任务列表" : "收起任务列表";
+  collapse.title = store.listsCollapsed ? t("main.listsExpand", "展开任务列表") : t("main.listsCollapse", "收起任务列表");
   collapse.addEventListener("click", () => {
     store.listsCollapsed = !store.listsCollapsed;
     renderSidebar();
@@ -330,7 +360,7 @@ function renderSidebar() {
   }
   nav.append(navItem({
     icon: ICON.add,
-    label: "新建任务列表",
+    label: t("main.newList", "新建任务列表"),
     onClick: () => $("btnNewList").click(),
   }));
 }
@@ -339,7 +369,7 @@ function renderAccount() {
   const label = $("accountLabel");
   if (!label) return;
   const { email, id } = store.account;
-  label.textContent = email || (store.demo ? "演示数据" : id || "未登录");
+  label.textContent = email || (store.demo ? t("main.demoData", "演示数据") : id || t("main.notLogged", "未登录"));
   label.title = email && id ? `${email}（${id}）` : label.textContent;
 }
 
@@ -364,7 +394,7 @@ function renderTasks() {
   if (store.activeListId === VIRTUAL_STARRED) {
     const starred = orderedTasks(visibleTasks());
     if (!starred.length) {
-      container.append(emptyState("没有已加星标的任务"));
+      container.append(emptyState(t("main.emptyStarred", "没有已加星标的任务")));
       return;
     }
     for (const task of starred) container.append(renderTask(task));
@@ -387,11 +417,11 @@ function renderComposerHint() {
   const input = $("inputNewTask");
   if (!input) return;
   if (!isVirtual(store.activeListId)) {
-    input.placeholder = "添加任务";
+    input.placeholder = t("main.addTask", "添加任务");
     return;
   }
   const target = store.lists.find((list) => list.id === targetListId());
-  input.placeholder = target ? `添加到「${target.title}」` : "添加任务";
+  input.placeholder = target ? t("main.addTaskTo", "添加到「{title}」", { title: target.title }) : t("main.addTask", "添加任务");
 }
 
 function emptyState(text) {
@@ -399,7 +429,7 @@ function emptyState(text) {
   empty.className = "empty";
   empty.innerHTML = ICON.empty;
   const line = document.createElement("div");
-  line.textContent = text || (store.demo ? "太好了，没有待办任务！" : "暂无任务");
+  line.textContent = text || (store.demo ? t("main.emptyAllDone", "太好了，没有待办任务！") : t("main.emptyNone", "暂无任务"));
   empty.append(line);
   return empty;
 }
@@ -416,7 +446,7 @@ function renderSection(list, tasks, { bare = false } = {}) {
     const name = document.createElement("button");
     name.className = "section-name";
     name.textContent = list.title;
-    name.title = `打开「${list.title}」`;
+    name.title = t("main.openList", "打开「{title}」", { title: list.title });
     name.addEventListener("click", () => selectList(list.id));
     head.append(name);
     section.append(head);
@@ -445,7 +475,7 @@ function completedToggle(list, total, loaded) {
   icon.className = "nav-icon";
   icon.innerHTML = open ? ICON.expandMore : ICON.chevron;
   const label = document.createElement("span");
-  label.textContent = `已完成 (${total})`;
+  label.textContent = t("main.completedCount", "已完成 ({total})", { total });
   row.append(icon, label);
   if (list) {
     row.addEventListener("click", () => {
@@ -460,7 +490,7 @@ function completedToggle(list, total, loaded) {
 function partialHint(missing) {
   const row = document.createElement("div");
   row.className = "partial-hint";
-  row.textContent = `还有 ${missing} 条已完成任务未载入（快照每个清单只返回前 10 条，需要 listTasks 的 rpcid 翻页）`;
+  row.textContent = t("main.completedMore", "还有 {missing} 条已完成任务未载入（快照每个清单只返回前 10 条，需要 listTasks 的 rpcid 翻页）", { missing });
   return row;
 }
 
@@ -468,9 +498,13 @@ function partialHint(missing) {
 function formatCompletedDate(value) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "";
-  const weekday = "日一二三四五六"[date.getDay()];
-  const year = date.getFullYear() === new Date().getFullYear() ? "" : `${date.getFullYear()}年`;
-  return `${year}${date.getMonth() + 1}月${date.getDate()}日周${weekday}`;
+  if (i18nLang().startsWith("zh")) {
+    const weekday = "日一二三四五六"[date.getDay()];
+    const year = date.getFullYear() === new Date().getFullYear() ? "" : `${date.getFullYear()}年`;
+    return `${year}${date.getMonth() + 1}月${date.getDate()}日周${weekday}`;
+  }
+  const year = date.getFullYear() === new Date().getFullYear() ? "" : `, ${date.getFullYear()}`;
+  return `${t("weekday." + date.getDay(), WEEKDAYS_EN[date.getDay()])}, ${formatDay(date)}${year}`;
 }
 
 function renderTask(task) {
@@ -481,7 +515,7 @@ function renderTask(task) {
 
   const box = document.createElement("button");
   box.className = "checkbox";
-  box.title = task.completed ? "标记为未完成" : "标记为已完成";
+  box.title = task.completed ? t("main.markIncomplete", "标记为未完成") : t("main.markComplete", "标记为已完成");
   box.setAttribute("aria-label", box.title);
   box.innerHTML = ICON.check;
   box.addEventListener("click", (event) => {
@@ -507,7 +541,7 @@ function renderTask(task) {
   const chips = [];
   if (task.due && task.due.date) chips.push(dueChip(task));
   if (task.recurrence) chips.push({ icon: ICON.repeat, text: task.recurrence });
-  if (task.starred) chips.push({ icon: ICON.starOn, text: "已加星标", cls: "starred" });
+  if (task.starred) chips.push({ icon: ICON.starOn, text: t("main.starred", "已加星标"), cls: "starred" });
   if (chips.length) {
     const meta = document.createElement("div");
     meta.className = "task-meta";
@@ -524,7 +558,7 @@ function renderTask(task) {
   if (task.completed && task.completedAt) {
     const line = document.createElement("div");
     line.className = "task-completed-date";
-    line.textContent = `完成日期：${formatCompletedDate(task.completedAt)}`;
+    line.textContent = t("main.completedAt", "完成日期：{date}", { date: formatCompletedDate(task.completedAt) });
     main.append(line);
   }
 
@@ -534,8 +568,8 @@ function renderTask(task) {
     // 网页端在已完成行上只放删除，星标和选项都收进详情页。
     const remove = document.createElement("button");
     remove.className = "icon-btn";
-    remove.title = "删除任务";
-    remove.setAttribute("aria-label", "删除任务");
+    remove.title = t("main.deleteTaskTitle", "删除任务");
+    remove.setAttribute("aria-label", t("main.deleteTaskTitle", "删除任务"));
     remove.innerHTML = ICON.trash;
     remove.addEventListener("click", (event) => {
       event.stopPropagation();
@@ -545,8 +579,8 @@ function renderTask(task) {
   } else {
     const more = document.createElement("button");
     more.className = "icon-btn";
-    more.title = "任务选项";
-    more.setAttribute("aria-label", "任务选项");
+    more.title = t("main.taskOptions", "任务选项");
+    more.setAttribute("aria-label", t("main.taskOptions", "任务选项"));
     more.innerHTML = ICON.more;
     more.addEventListener("click", (event) => {
       event.stopPropagation();
@@ -554,7 +588,7 @@ function renderTask(task) {
     });
     const star = document.createElement("button");
     star.className = "icon-btn star-btn" + (task.starred ? " on always" : "");
-    star.title = task.starred ? "从“已加星标”中移除" : "添加到“已加星标”";
+    star.title = task.starred ? t("main.unstar", "从“已加星标”中移除") : t("main.star", "添加到“已加星标”");
     star.setAttribute("aria-label", star.title);
     star.innerHTML = task.starred ? ICON.starOn : ICON.star;
     star.addEventListener("click", (event) => {
@@ -565,8 +599,8 @@ function renderTask(task) {
   }
   const open = document.createElement("button");
   open.className = "icon-btn";
-  open.title = "详细信息";
-  open.setAttribute("aria-label", "详细信息");
+  open.title = t("main.detailInfo", "详细信息");
+  open.setAttribute("aria-label", t("main.detailInfo", "详细信息"));
   open.innerHTML = ICON.chevron;
   open.addEventListener("click", (event) => {
     event.stopPropagation();
@@ -581,7 +615,7 @@ function renderTask(task) {
 function dueChip(task) {
   const overdue = isOverdue(task);
   const date = new Date(task.due.date + "T00:00:00");
-  const label = `${date.getMonth() + 1}月${date.getDate()}日` + (task.due.time ? ` ${task.due.time}` : "");
+  const label = formatDay(date) + (task.due.time ? ` ${task.due.time}` : "");
   return { icon: ICON.calendar, text: label, cls: overdue && !task.completed ? "overdue" : "" };
 }
 
@@ -628,7 +662,7 @@ function renderDetail() {
   starBtn.addEventListener("click", () => toggleStar(task));
   const starLabel = document.createElement("div");
   starLabel.className = "detail-field";
-  starLabel.textContent = task.starred ? "已加星标" : "加星标";
+  starLabel.textContent = task.starred ? t("main.starred", "已加星标") : t("main.starAdd", "加星标");
   starRow.append(starBtn, starLabel);
   body.append(starRow);
 
@@ -640,7 +674,7 @@ function renderDetail() {
   dueIcon.innerHTML = ICON.calendar;
   const dueFields = document.createElement("div");
   dueFields.className = "detail-field";
-  dueFields.innerHTML = "<label>日期 / 时间</label>";
+  dueFields.innerHTML = `<label>${t("main.fieldDue", "日期 / 时间")}</label>`;
   const dueWrap = document.createElement("div");
   dueWrap.className = "due-wrap";
   const dateInput = document.createElement("input");
@@ -658,7 +692,7 @@ function renderDetail() {
   dueRow.append(dueIcon, dueFields);
   body.append(dueRow);
   if (!opReady("setDueDateTime")) {
-    body.append(warningLine("「时分」官方 API 不支持，需要 setDueDateTime 的 rpcid。"));
+    body.append(warningLine(t("main.warnTime", "「时分」官方 API 不支持，需要 setDueDateTime 的 rpcid。")));
   }
 
   // 重复
@@ -669,12 +703,12 @@ function renderDetail() {
   repeatIcon.innerHTML = ICON.repeat;
   const repeatField = document.createElement("div");
   repeatField.className = "detail-field";
-  repeatField.innerHTML = "<label>重复</label>";
+  repeatField.innerHTML = `<label>${t("main.fieldRepeat", "重复")}</label>`;
   const repeatSelect = document.createElement("select");
-  for (const option of ["不重复", "每天", "每周", "每月", "每年"]) {
+  for (const option of RECURRENCE_VALUES) {
     const node = document.createElement("option");
     node.value = option;
-    node.textContent = option;
+    node.textContent = recurrenceLabel(option);
     if ((task.recurrence || "不重复") === option) node.selected = true;
     repeatSelect.append(node);
   }
@@ -691,10 +725,10 @@ function renderDetail() {
   notesRow.className = "detail-row";
   const notesField = document.createElement("div");
   notesField.className = "detail-field";
-  notesField.innerHTML = "<label>说明</label>";
+  notesField.innerHTML = `<label>${t("main.fieldNotes", "说明")}</label>`;
   const notesArea = document.createElement("textarea");
   notesArea.value = task.notes || "";
-  notesArea.placeholder = "添加说明";
+  notesArea.placeholder = t("main.notesPlaceholder", "添加说明");
   notesArea.addEventListener("change", () => updateTask(task, { notes: notesArea.value }));
   notesField.append(notesArea);
   notesRow.append(notesField);
@@ -707,7 +741,7 @@ function renderDetail() {
     subRow.className = "detail-row";
     const subField = document.createElement("div");
     subField.className = "detail-field";
-    subField.innerHTML = "<label>子任务</label>";
+    subField.innerHTML = `<label>${t("main.fieldSubtasks", "子任务")}</label>`;
     for (const child of children) {
       const line = document.createElement("div");
       line.textContent = "· " + child.title;
@@ -720,10 +754,10 @@ function renderDetail() {
 
   const addSub = document.createElement("button");
   addSub.className = "btn";
-  addSub.textContent = "添加子任务";
+  addSub.textContent = t("main.addSubtask", "添加子任务");
   addSub.addEventListener("click", () => {
     if (!requireOp("addSubtask")) return;
-    const title = window.prompt("子任务标题");
+    const title = window.prompt(t("main.promptSubtaskTitle", "子任务标题"));
     if (title) createTask(title, task.id);
   });
   body.append(addSub);
@@ -739,7 +773,7 @@ function warningLine(text) {
 
 function requireOp(op) {
   if (opReady(op)) return true;
-  toast(`操作 ${op} 还没发现 rpcid，请到工作台抓包后固化`, true);
+  toast(t("main.toastRpcMissing", "操作 {op} 还没发现 rpcid，请到工作台抓包后固化", { op }), true);
   return false;
 }
 
@@ -824,7 +858,7 @@ async function createTask(title, parentId) {
   }
   const listId = targetListId();
   if (!listId) {
-    toast("还没有清单，先新建一个任务列表", true);
+    toast(t("main.toastNoLists", "还没有清单，先新建一个任务列表"), true);
     return;
   }
   if (!requireOp("createTask")) return;
@@ -875,9 +909,14 @@ function renderAll() {
 
 function bindUI() {
   $("btnDemo").addEventListener("click", () => toggleDemo());
+  $("btnLang").addEventListener("click", (event) => {
+    openLangMenu(event.currentTarget).catch((error) =>
+      toast(t("main.toastLangMenuFailed", "语言菜单打开失败：{message}", { message: error.message }), true),
+    );
+  });
   $("btnTheme").addEventListener("click", (event) => {
     openThemeMenu(event.currentTarget).catch((error) =>
-      toast(`主题菜单打开失败：${error.message}`, true),
+      toast(t("main.toastThemeMenuFailed", "主题菜单打开失败：{message}", { message: error.message }), true),
     );
   });
   // 菜单里选完由 Go 落盘并广播回来，这里只需跟着刷新图标。
@@ -886,7 +925,7 @@ function bindUI() {
   $("btnDeleteTask").addEventListener("click", () => deleteTask());
   $("btnRefresh").addEventListener("click", () => {
     if (store.demo) {
-      toast("演示模式下不联网，先关掉演示再刷新", true);
+      toast(t("main.toastDemoOffline", "演示模式下不联网，先关掉演示再刷新"), true);
       return;
     }
     loadData();
@@ -904,11 +943,11 @@ function bindUI() {
   });
   $("btnAddTask").addEventListener("click", submit);
   $("btnNewTaskDate").addEventListener("click", () => {
-    toast("先在演示/真实数据里创建任务，再用详情面板设置日期与时分");
+    toast(t("main.toastDemoDate", "先在演示/真实数据里创建任务，再用详情面板设置日期与时分"));
   });
 
   $("btnNewList").addEventListener("click", async () => {
-    const title = window.prompt("新清单名称");
+    const title = window.prompt(t("main.promptListName", "新清单名称"));
     if (!title) return;
     if (store.demo) {
       store.lists.push({ id: "demo-list-" + Date.now(), title });
@@ -926,14 +965,22 @@ function bindUI() {
 
   $("btnListMenu").addEventListener("click", () => {
     const ready = [...store.ops.entries()].filter(([, v]) => v).map(([k]) => k);
-    toast(ready.length ? `已固化操作: ${ready.join(", ")}` : "还没有固化任何 rpcid", ready.length === 0);
+    toast(ready.length ? t("main.toastOpsSaved", "已固化操作: {ops}", { ops: ready.join(", ") }) : t("main.toastOpsNone", "还没有固化任何 rpcid"), ready.length === 0);
   });
 }
 
 async function init() {
   initTheme();
   await loadServerTheme();
+  await loadI18n();
   renderThemeButton();
+  renderLangButton();
+  // 切语言后整份界面重渲染：静态文案 applyI18n 自己刷，动态列表靠这里。
+  onI18n(() => {
+    renderThemeButton();
+    renderLangButton();
+    renderAll();
+  });
   bindUI();
   await refreshOps();
   await loadData();
