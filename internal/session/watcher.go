@@ -89,8 +89,8 @@ func (w *Watcher) SetChangeHandler(handler ChangeHandler) {
 	w.mu.Unlock()
 }
 
-// SetAutoManage toggles automatic show/hide of the session window. The watcher
-// itself never touches windows; the change handler installed in main does.
+// SetAutoManage toggles automatic recovery of an expired session. The watcher
+// itself never touches the main window; the change handler installed in main does.
 func (w *Watcher) SetAutoManage(enabled bool) {
 	w.mu.Lock()
 	w.autoManage = enabled
