@@ -165,7 +165,7 @@ async function setAutoFlags() {
       },
     });
     toast(
-      t("wb.autoToast", "自动隐藏会话: {a} · 自动抓包: {b}", {
+      t("wb.autoToast", "会话过期自动恢复: {a} · 自动抓包: {b}", {
         a: $("chkAutoManage").checked ? t("wb.on", "开") : t("wb.off", "关"),
         b: $("chkAutoSniff").checked ? t("wb.on", "开") : t("wb.off", "关"),
       }),
@@ -180,7 +180,7 @@ async function setAutoFlags() {
 async function setSniff(on) {
   try {
     const control = await api("/api/sniff", { method: "POST", body: { on } });
-    toast(control.sniffing ? t("wb.sniffOn", "抓包已开启，去会话窗口里操作吧") : t("wb.sniffOff", "抓包已停止"));
+    toast(control.sniffing ? t("wb.sniffOn", "抓包已开启，去主窗口里操作吧") : t("wb.sniffOff", "抓包已停止"));
     await pollSniff();
   } catch (error) {
     toast(error.message, true);
