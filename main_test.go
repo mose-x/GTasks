@@ -39,7 +39,8 @@ func newTestHandler(t *testing.T) http.Handler {
 func TestAssetHandlerServesFrontend(t *testing.T) {
 	handler := newTestHandler(t)
 
-	for _, path := range []string{"/", "/app.js", "/styles.css", "/workbench.html", "/workbench.js", "/workbench.css", "/shared.js"} {
+	// 克隆界面退役后，内嵌资源只剩逆向工作台与控制台 API 用的共享脚本。
+	for _, path := range []string{"/workbench.html", "/workbench.js", "/workbench.css", "/shared.js"} {
 		response := httptest.NewRecorder()
 		handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, path, nil))
 		if response.Code != http.StatusOK {
@@ -50,11 +51,15 @@ func TestAssetHandlerServesFrontend(t *testing.T) {
 		}
 	}
 
-	// http.FileServerFS canonicalises /index.html to /.
+	// 根路径不再有克隆界面：FileServer 会把 /index.html 规整到 /，而 / 现在
+	// 只是工作台的目录列表，不再返回克隆界面的 HTML。
 	response := httptest.NewRecorder()
-	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/index.html", nil))
-	if response.Code != http.StatusMovedPermanently {
-		t.Fatalf("/index.html: expected 301, got %d", response.Code)
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/", nil))
+	if response.Code != http.StatusOK {
+		t.Fatalf("/: expected 200, got %d", response.Code)
+	}
+	if body := response.Body.String(); strings.Contains(body, "id=\"app\"") || strings.Contains(body, "class=\"app\"") {
+		t.Fatalf("/ 不该再返回克隆界面: %q", body[:min(len(body), 120)])
 	}
 }
 
@@ -200,81 +205,34 @@ func TestRecorderPersistenceAppendsJSONLines(t *testing.T) {
 	}
 }
 
-// 会话页是数据通道，整页重载要停几秒；语言没变时连问都不该问窗口可见性
-// （启动时 OnChange 会先回调一次，那会儿窗口还没建好）。
+// 主窗口就是内嵌的 Google 页：语言没变时不该触发任何重载。
 func TestLangNavigatorSkipsRedundantReload(t *testing.T) {
 	nav := newLangNavigator("zh")
-	probe := func() bool {
-		t.Fatal("语言没变时不该去问窗口可见性")
-		return false
-	}
-
-	if url := nav.request("zh", probe); url != "" {
+	if url := nav.request("zh"); url != "" {
 		t.Fatalf("同一种语言不该重载，得到 %q", url)
-	}
-	if nav.waiting() {
-		t.Fatal("没有欠账")
 	}
 	if nav.isQuiet() {
 		t.Fatal("没重载就不该让 watcher 安静")
 	}
 }
 
-// 会话窗藏着时把重载欠下来：主窗口只换文案，桥接不停；等窗口露面再补上。
-func TestLangNavigatorDefersWhileHidden(t *testing.T) {
+// 主窗口永远在屏幕上：选了新语言当场就载，并给 watcher 留一段安静期；
+// 页面 announce 就绪后安静期收短。
+func TestLangNavigatorReloadsImmediatelyAndQuietsWatcher(t *testing.T) {
 	nav := newLangNavigator("zh")
-	hidden := func() bool { return false }
-	shown := func() bool { return true }
 
-	if url := nav.request("en", hidden); url != "" {
-		t.Fatalf("窗口藏着时不该立刻重载，得到 %q", url)
-	}
-	if !nav.waiting() {
-		t.Fatal("欠着的重载没记下来")
-	}
-	if url := nav.owed(hidden); url != "" {
-		t.Fatalf("窗口还藏着，不该重载，得到 %q", url)
-	}
-
-	url := nav.owed(shown)
-	if url != tasksURLFor("en") {
-		t.Fatalf("窗口露面后该补上重载，得到 %q", url)
-	}
-	if nav.waiting() {
-		t.Fatal("补过一次就该结清")
+	if url := nav.request("en"); url != tasksURLFor("en") {
+		t.Fatalf("切语言应当场拿到重载地址，得到 %q", url)
 	}
 	if !nav.isQuiet() {
-		t.Fatal("重载期间要让 watcher 安静，别把会话窗弹到脸上")
+		t.Fatal("重载期间要让 watcher 安静，别把掉线误判成会话失效")
+	}
+	if url := nav.request("zh"); url != tasksURLFor("zh") {
+		t.Fatalf("切回来也该重载，得到 %q", url)
 	}
 
 	nav.settled()
 	if left := time.Until(nav.quietTil); left <= 0 || left > sessionReadyGrace {
 		t.Fatalf("页面就绪后安静期该收短到 %v 以内，实际还剩 %v", sessionReadyGrace, left)
-	}
-}
-
-// 用户正盯着会话页时当场重载（启动遮罩盖住白屏）。
-func TestLangNavigatorReloadsVisibleSession(t *testing.T) {
-	nav := newLangNavigator("zh")
-	shown := func() bool { return true }
-
-	if url := nav.request("en", shown); url != tasksURLFor("en") {
-		t.Fatalf("窗口露面时该立刻重载，得到 %q", url)
-	}
-	if url := nav.request("zh", shown); url != tasksURLFor("zh") {
-		t.Fatalf("切回来也该重载，得到 %q", url)
-	}
-}
-
-// 欠着的重载被切回原语言抵消：页面本来就是那门语言，不该白白载一次。
-func TestLangNavigatorCancelsDeferredReload(t *testing.T) {
-	nav := newLangNavigator("zh")
-	nav.request("en", func() bool { return false })
-
-	if url := nav.request("zh", func() bool { return true }); url != "" {
-		t.Fatalf("切回页面本来的语言不该重载，得到 %q", url)
-	}
-	if nav.waiting() {
-		t.Fatal("欠账应该被抵消")
 	}
 }

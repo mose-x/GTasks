@@ -237,26 +237,18 @@ type Handler struct {
 	tasksMu    sync.Mutex
 	tasksCache map[string]any
 
-	mu         sync.RWMutex
-	mainWin    *application.WebviewWindow
-	sessionWin *application.WebviewWindow
-	themeMenu  ThemeMenuOpener
-	langMenu   LangMenuOpener
-	winLookup  WindowLookup
-	shownHook  SessionShownReporter
+	mu        sync.RWMutex
+	win       *application.WebviewWindow
+	themeMenu ThemeMenuOpener
+	langMenu  LangMenuOpener
+	winLookup WindowLookup
 }
 
 // WindowLookup 按名字取窗口（工作台是懒创建的，API 侧拿不到直接引用）。
 type WindowLookup func(name string) *application.WebviewWindow
 
-// SessionShownReporter 把会话窗口的显示 / 隐藏报给 main：切语言的重载要挑窗口
-// 收起来的时候欠着、露面了再补。wails 的 IsVisible 读的是遮挡状态（被别的窗口
-// 完全盖住就算不可见），拿它当「我们有没有把窗口收起来」的判据不靠谱，所以由
-// 调用方自己记账。
-type SessionShownReporter func(shown bool)
-
 // ThemeMenuOpener 在调用方指定的 webview 坐标处弹出主题单选菜单。由 main 注入，
-// 这样前端按钮点下去弹的是原生菜单，和会话页顶栏那颗按钮行为一致。
+// 这样前端按钮点下去弹的是原生菜单，和 Google 页顶栏注入的那颗按钮行为一致。
 type ThemeMenuOpener func(source string, x, y int)
 
 // LangMenuOpener 在调用方指定的 webview 坐标处弹出语言单选菜单，菜单项由打包
@@ -308,11 +300,11 @@ func NewHandler(deps Deps) *Handler {
 	}
 }
 
-// BindWindows records the windows the API is allowed to control.
-func (h *Handler) BindWindows(mainWin, sessionWin *application.WebviewWindow) {
+// BindWindow records the window the API is allowed to control: the single
+// webview that carries the embedded Google page.
+func (h *Handler) BindWindow(win *application.WebviewWindow) {
 	h.mu.Lock()
-	h.mainWin = mainWin
-	h.sessionWin = sessionWin
+	h.win = win
 	h.mu.Unlock()
 }
 
@@ -335,23 +327,6 @@ func (h *Handler) SetLangMenuOpener(opener LangMenuOpener) {
 	h.mu.Lock()
 	h.langMenu = opener
 	h.mu.Unlock()
-}
-
-// SetSessionShownHook 注入会话窗口显隐的上报回调。
-func (h *Handler) SetSessionShownHook(report SessionShownReporter) {
-	h.mu.Lock()
-	h.shownHook = report
-	h.mu.Unlock()
-}
-
-// reportSessionShown 在 Show / Hide 之后调用，把窗口状态同步出去。
-func (h *Handler) reportSessionShown(shown bool) {
-	h.mu.RLock()
-	report := h.shownHook
-	h.mu.RUnlock()
-	if report != nil {
-		report(shown)
-	}
 }
 
 // ServeHTTP implements http.Handler for the /api subtree.
@@ -409,16 +384,15 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 type stateResponse struct {
-	Ready         bool               `json:"ready"`
-	Session       *batchexec.Session `json:"session,omitempty"`
-	Sniffed       uint64             `json:"sniffed"`
-	Dropped       uint64             `json:"dropped"`
-	SessionWindow bool               `json:"sessionWindowVisible"`
-	Watcher       *session.Status    `json:"watcher,omitempty"`
-	AutoManage    bool               `json:"autoManage"`
-	Sniffing      bool               `json:"sniffing"`
-	OpsReady      int                `json:"opsReady"`
-	OpsTotal      int                `json:"opsTotal"`
+	Ready      bool               `json:"ready"`
+	Session    *batchexec.Session `json:"session,omitempty"`
+	Sniffed    uint64             `json:"sniffed"`
+	Dropped    uint64             `json:"dropped"`
+	Watcher    *session.Status    `json:"watcher,omitempty"`
+	AutoManage bool               `json:"autoManage"`
+	Sniffing   bool               `json:"sniffing"`
+	OpsReady   int                `json:"opsReady"`
+	OpsTotal   int                `json:"opsTotal"`
 }
 
 func (h *Handler) handleState(w http.ResponseWriter, _ *http.Request) {
@@ -433,9 +407,6 @@ func (h *Handler) handleState(w http.ResponseWriter, _ *http.Request) {
 		if err := json.Unmarshal(cached, &session); err == nil {
 			response.Session = &session
 		}
-	}
-	if sessionWin := h.sessionWindow(); sessionWin != nil {
-		response.SessionWindow = sessionWin.IsVisible()
 	}
 	if h.watcher != nil {
 		status := h.watcher.Status()
@@ -475,33 +446,25 @@ func (h *Handler) handleSession(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "请求体不是合法 JSON")
 		return
 	}
-	sessionWin := h.sessionWindow()
-	if sessionWin == nil {
-		writeError(w, http.StatusServiceUnavailable, "会话窗口不存在")
+	mainWin := h.mainWindow()
+	if mainWin == nil {
+		writeError(w, http.StatusServiceUnavailable, "主窗口不存在")
 		return
 	}
 	switch request.Action {
-	case "show":
-		sessionWin.Show()
-		h.reportSessionShown(true)
-	case "hide":
-		sessionWin.Hide()
-		h.reportSessionShown(false)
 	case "focus":
 		// 被其它窗口完全遮住时，WebKit 会把页面标成 hidden，Google 的前端会
-		// 停止渲染并忽略交互；逆向时需要能把会话窗口真正拉到前台。
-		sessionWin.Show()
-		sessionWin.Center()
-		sessionWin.Focus()
-		h.reportSessionShown(true)
+		// 停止渲染并忽略交互；逆向时需要能把主窗口真正拉到前台。
+		mainWin.Show()
+		mainWin.Center()
+		mainWin.Focus()
 	case "float":
-		sessionWin.Show()
-		sessionWin.Center()
-		sessionWin.SetAlwaysOnTop(true)
-		sessionWin.Focus()
-		h.reportSessionShown(true)
+		mainWin.Show()
+		mainWin.Center()
+		mainWin.SetAlwaysOnTop(true)
+		mainWin.Focus()
 	case "sink":
-		sessionWin.SetAlwaysOnTop(false)
+		mainWin.SetAlwaysOnTop(false)
 	case "windows":
 		list := make([]map[string]any, 0, 4)
 		for _, win := range application.Get().Window.GetAll() {
@@ -519,22 +482,22 @@ func (h *Handler) handleSession(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "windows": list})
 		return
 	case "info":
-		x, y := sessionWin.Position()
-		width, height := sessionWin.Size()
+		x, y := mainWin.Position()
+		width, height := mainWin.Size()
 		writeJSON(w, http.StatusOK, map[string]any{
-			"ok": true, "action": request.Action, "visible": sessionWin.IsVisible(),
-			"minimised": sessionWin.IsMinimised(), "x": x, "y": y,
+			"ok": true, "action": request.Action, "visible": mainWin.IsVisible(),
+			"minimised": mainWin.IsMinimised(), "x": x, "y": y,
 			"width": width, "height": height,
 		})
 		return
 	case "reload":
-		sessionWin.Reload()
+		mainWin.Reload()
 	case "navigate":
 		if request.URL == "" {
 			writeError(w, http.StatusBadRequest, "navigate 需要 url")
 			return
 		}
-		sessionWin.SetURL(request.URL)
+		mainWin.SetURL(request.URL)
 	default:
 		writeError(w, http.StatusBadRequest, "未知 action: "+request.Action)
 		return
@@ -577,7 +540,8 @@ func (h *Handler) handleSniffPost(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, control)
 }
 
-// handleEval 在会话页面里执行一段脚本，供逆向时查看全局对象或驱动只读交互。
+// handleEval 在主窗口（内嵌的 Google 页）或工作台里执行一段脚本，供逆向时
+// 查看全局对象或驱动只读交互。
 func (h *Handler) handleEval(w http.ResponseWriter, r *http.Request) {
 	var request struct {
 		JS     string `json:"js"`
@@ -600,7 +564,7 @@ func (h *Handler) handleEval(w http.ResponseWriter, r *http.Request) {
 	switch request.Window {
 	case "main":
 		h.mu.RLock()
-		target = h.mainWin
+		target = h.win
 		h.mu.RUnlock()
 	case "workbench":
 		if lookup != nil {
@@ -826,10 +790,11 @@ func (h *Handler) handleDecode(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"responses": responses})
 }
 
-func (h *Handler) sessionWindow() *application.WebviewWindow {
+// mainWindow 返回承载内嵌 Google 页的那个 webview。
+func (h *Handler) mainWindow() *application.WebviewWindow {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
-	return h.sessionWin
+	return h.win
 }
 
 func writeJSON(w http.ResponseWriter, status int, payload any) {

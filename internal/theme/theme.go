@@ -71,14 +71,6 @@ func PageBackground(dark bool) RGB {
 	return RGB{R: 248, G: 250, B: 253}
 }
 
-// AppBackground 是主窗口首屏底色，与 frontend/styles.css 的 --bg 一致。
-func AppBackground(dark bool) RGB {
-	if dark {
-		return RGB{R: 32, G: 33, B: 36}
-	}
-	return RGB{R: 255, G: 255, B: 255}
-}
-
 // WorkbenchBackground 是工作台窗口首屏底色，与 frontend/workbench.css 的
 // --bg 一致；工作台固定深色，不跟全局主题走。
 func WorkbenchBackground() RGB {

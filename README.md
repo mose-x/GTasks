@@ -8,11 +8,12 @@ official API cannot do (stars / due times / recurrence).
 
 At this stage there are two parts:
 
-1. **Main window** — a light-theme UI modelled on `tasks.google.com` (sidebar / task
-   list / detail panel), with a demo-data mode so fidelity can be checked before a
-   given rpcid has been discovered.
-2. **Reverse-engineering workbench** — a separate window used to sign in, capture
-   traffic, and freeze captured rpcids into reusable "operations".
+1. **Main window** — the real `tasks.google.com` page embedded in a native window:
+   the UI you use is Google's own, dressed with a few injected controls (theme /
+   language buttons in the top bar, per-list and per-row menus). Sign-in happens on
+   Google's own login page, inside the same window.
+2. **Reverse-engineering workbench** — a separate, developer-facing window used to
+   capture traffic and freeze captured rpcids into reusable "operations".
 
 > ⚠️ This project talks to Google through undocumented endpoints, which violates the
 > [Google Terms of Service](https://policies.google.com). For personal study only —
@@ -39,21 +40,21 @@ The usual approach is "scrape the cookies into Go and issue the requests yoursel
 which is cross-platform but brittle. This project instead does:
 
 ```
-┌────────────────┐  ┌────────────────┐   ┌──────────────────────────────┐
-│ Main window     │  │ Workbench      │   │ Session window (auto-hidden) │
-│ /              │  │ /workbench.html│   │ https://tasks.google.com/    │
-│ Tasks UI       │  │ capture/freeze │   │ Google sign-in + web app     │
-│                │  │                │   │ ← bootstrap.js injected      │
-└───────┬────────┘  └───────┬────────┘   └──────────┬────────▲──────────┘
-        │ HTTP (asset server)                       │ ExecJS │ external
-        ▼                                           ▼        │ postMessage
-┌────────────────────────────────────────────────────────────┴──────────────┐
+┌──────────────────────────────┐   ┌────────────────┐
+│ Main window                  │   │ Workbench      │
+│ https://tasks.google.com/    │   │ /workbench.html│
+│ Google sign-in + web app     │   │ capture/freeze │
+│ ← bootstrap.js injected      │   │                │
+└───────────┬──────────────────┘   └───────┬────────┘
+            │ ExecJS / postMessage         │ HTTP (asset server)
+            ▼                              ▼
+┌───────────────────────────────────────────────────────────────────────────┐
 │ api.Handler → tasks.Service → tasks.Registry → batchexec.Client           │
 │                                ↘ session.Watcher (login-state polling)     │
 └───────────────────────────────────────────────────────────────────────────┘
 ```
 
-**The key point: every Google request is issued by `fetch` inside the session
+**The key point: every Google request is issued by `fetch` inside the main
 window's own page.**
 
 - Cookies are attached by the browser; the Go side never touches a credential
@@ -125,15 +126,12 @@ the capture log; if the previous round was abnormal, the check runs every round 
 
 Once the verdict is `unauthorized` / `redirected`:
 
-- the main window shows a "session expired, please sign in again" banner with an
-  "Open sign-in window" button
 - the workbench `Login` badge becomes `yes (session dead)`
-- `main.go` pops the session window and reloads it once (rate limited to once per
-  3 minutes), then hands over to Google's own login flow
-- the window hides itself again once login completes or the session recovers
+- `main.go` reloads the main window once (rate limited to once per 3 minutes) and
+  hands over to Google's own login flow, which renders inside the same window
 
 Rotation of cookies such as `__Secure-1PSIDTS` is done by the page's own JavaScript (the
-session window loads the real tasks.google.com); this project does not rotate anything.
+main window loads the real tasks.google.com); this project does not rotate anything.
 A failed rotation eventually surfaces as 401 / redirect, which the health check catches
 all the same.
 
@@ -169,7 +167,8 @@ When Google changes the structure it shows up there first, instead of manifestin
 field quietly disappeared". `internal/tasks/model_test.go` pins every slot down with a
 synthetic snapshot (containing no real task content).
 
-The main window therefore has exactly one data endpoint: `GET /api/tasks`.
+The workbench and the discovery workflow therefore have exactly one data endpoint:
+`GET /api/tasks`. The visible UI needs none of it — Google's own page renders itself.
 
 ## Write layer: a single bidirectional sync channel, `SOV0tb`
 
@@ -292,8 +291,9 @@ only keeps their description, no steps), and the rest are still waiting on captu
 ```
 
 `tasks.Service.Execute(ctx, "snapshot", params)` renders the template → batches → sends
-through the page → decodes the response. Every button in the main window calls one op, so
-**each channel that gets unlocked lights up another batch of features in the UI**.
+through the page → decodes the response. Every operation the workbench can execute calls
+one op, so **each channel that gets unlocked lights up another batch of scripted
+features**.
 
 The registry is persisted in the user config directory, and captures are persisted as
 JSONL:
@@ -307,15 +307,15 @@ JSONL:
 Inside: `operations.json` (the operation map) and `captures.jsonl` (append-only capture
 history).
 
-## Desktop adaptations: the injected layer in the session page
+## Desktop adaptations: the injected layer in the main window
 
-The session window is the real tasks.google.com you use every day. The UI layer of
+The main window is the real tasks.google.com you use every day. The UI layer of
 `internal/bridge/bootstrap.js` makes a few desktop-friendly changes on top of it (DOM and
 callbacks into Go only — Google's own logic is never replaced):
 
 - **The "Google apps" waffle is removed from the top bar** (hidden with pure CSS).
 - **Theme / language buttons in the top bar**: absolutely positioned into the gap left of
-  the "?" (order: theme / language / ?, matching the main window's sidebar); clicking
+  the "?" (order: theme / language / ?); clicking
   opens Go's native radio menu. There is a trap here: the right segment of Google's top
   bar (`.gb_Pe`) is an `overflow: hidden` clipping box only 96px wide, so injected
   buttons drawn outside it simply do not show; the `.gb_fe` on the left is a `flex: 1` gap.
@@ -327,7 +327,7 @@ callbacks into Go only — Google's own logic is never replaced):
   (`<data dir>/theme.txt`). On macOS it switches both `NSApp.appearance` and each window's
   `appearance`, so the title bar and the Google page's `prefers-color-scheme` change
   together. Google's colours are entirely media-query driven and recompute the moment the
-  appearance changes, so switching theme **no longer reloads the session page**; a reload
+  appearance changes, so switching theme **no longer reloads the page**; a reload
   is only used as a fallback when the page reports that its media queries did not follow
   (certain WebView versions).
 - **"Help" in the "Support" menu is repurposed into "GTasks Workbench"**: it reuses
@@ -337,16 +337,16 @@ callbacks into Go only — Google's own logic is never replaced):
 - **Startup splash**: there is a 1–3 second gap between navigation and Google's first
   paint. At document-start the bootstrap covers the page with a splash in the current
   theme colour plus a spinner (`#gtasks-splash`) and fades it out as soon as the shell
-  renders; the splash ignores mouse events and has an 8 second hard timeout. All three
+  renders; the splash ignores mouse events and has an 8 second hard timeout. Both
   windows' `BackgroundColour` and the webview's `underPageBackgroundColor` are also
   pre-set from the theme, so dark mode no longer flashes white.
 - **A "⋮" on every list row in the sidebar**: appears on hover and still clicks Google's
   own "List options" menu (sort / rename / delete / move…); if that list is not currently
   rendered in the content area it is selected first, then clicked.
 - **The context menu is a native custom one**: back / reload / cut / copy / paste / select
-  all / inspect element — "Forward" from WebKit's default menu is gone. The main window and
-  the workbench use the Wails runtime's `--custom-contextmenu` CSS variables; the session
-  page intercepts `contextmenu` in the bootstrap and calls back into Go.
+  all / inspect element — "Forward" from WebKit's default menu is gone. The workbench uses
+  the Wails runtime's `--custom-contextmenu` CSS variables; the Google page intercepts
+  `contextmenu` in the bootstrap and calls back into Go.
 
 The app icon is Google Tasks' own product mark (the `tasks_2026` SVG on gstatic, personal
 use only): `build/macos-icon.sh` rasterises it with headless Chrome into an iconset and
@@ -426,20 +426,20 @@ layer `--no-verify` cannot bypass. The JS and Python toolchains the hooks need
 Daily work happens on `dev` and reaches `main` through a pull request, so a
 commit that skipped the local hooks still cannot land on `main`.
 
-Two windows appear on launch: **Google Tasks** (the main UI) and **Google Session**
-(loads `tasks.google.com`; it redirects to Google's login page when signed out). The
-**workbench** does not pop up by default — open it from "GTasks Workbench" in the "?" menu
-of the session page's top bar (it is rebuilt on demand after being closed).
+One window appears on launch: the embedded `tasks.google.com` page (it shows Google's
+own login page when signed out). The **workbench** does not pop up by default — open it
+from "GTasks Workbench" in the "?" menu of the top bar (it is rebuilt on demand after
+being closed).
 
 Theme has three settings (light / dark / follow system) owned by Go, with a button in the
-main window's sidebar and one in the session page's top bar; switching in either place
-syncs everywhere. Dark mode follows Google's own web dark palette (background `#202124`,
-body text `#e8eaed`, accent `#8ab4f8`) and sets `color-scheme: dark` so native controls
-(date picker, dropdowns, scrollbars) darken too. Switching is instant: the native
-appearance changes, then every window's CSS variables and the Google page's media queries
-recompute — no page reload. Before the main window's first frame, an inline script in
-`index.html` applies the cached localStorage colours so dark mode does not flash white.
-The workbench is a reverse-engineering tool and stays dark regardless of theme.
+Google page's top bar (and one in the workbench); switching in either place syncs
+everywhere. Dark mode is Google's own web dark palette, driven by
+`prefers-color-scheme`, so native controls (date picker, dropdowns, scrollbars) darken
+too. Switching is instant: the native window appearance changes and the page's media
+queries recompute — no page reload. Before the first frame, the window's
+`BackgroundColour` and the bootstrap splash use the cached localStorage theme, so dark
+mode does not flash white. The workbench is a reverse-engineering tool and stays dark
+regardless of theme.
 
 Capture history is reloaded into the workbench after a restart (the last 3000 entries are
 kept, the UI shows the newest 400 rows). Entries classified as "internal sync calls"
@@ -448,37 +448,33 @@ unselected list) collapse into a single group row that expands on click — they
 effect of the desktop adaptations, not something you care about while reverse-engineering.
 
 UI copy lives in `internal/i18n/locales/*.toml` (embedded with `go:embed`), currently
-Simplified Chinese and English: the main window sidebar, the session page top bar and the
-workbench top bar each have a language button (after the theme button) that opens Go's
-native radio menu. The current language is persisted at `<data dir>/lang.txt`, and
-switching updates all three windows plus the native context menu. The catalogues are flat
+Simplified Chinese and English: the Google page's top bar and the workbench top bar each
+have a language button (after the theme button) that opens Go's native radio menu. The current language is persisted at `<data dir>/lang.txt`, and
+switching updates both windows plus the native context menu. The catalogues are flat
 key/value files whose keys map one-to-one onto the fallback literals in the code's
 `t("key", "中文兜底")` calls; a missing key falls back to Chinese, so the UI never shows a
 hole. **Adding a language means dropping in a `jp.toml` and rebuilding** — the menu gains
 an entry with zero code changes (`meta.label` is the name shown in the menu, written in
-that language). The embedded Google page follows along: the session URL carries an `hl=`
+that language). The embedded Google page follows along: the window URL carries an `hl=`
 UI-language parameter (`zh`→`zh-CN`, `jp`→`ja`, everything else passed through), and
 switching language does one in-place `location.replace` reload so Google's own copy
 matches the app language.
 
 That reload is a full page load and the bridge has to pause for a few seconds, so
 `langNavigator` (`main.go`) keeps it to a minimum: no reload when the language is
-unchanged; when the session window is hidden (the normal state after login) the reload is
-deferred and settled once the window actually surfaces, so the main window only swaps its
-catalogue and the user feels nothing; only when the user is looking at the session page is
-it reloaded on the spot, with the white flash covered by the bootstrap splash. While the
-reload runs the `watcher` enters a quiet period (shortened to just cover the next poll
-once the page announces ready) so that ready-state jitter cannot throw the session window
-in your face. Over the same window, if `/api/tasks` hits an unavailable bridge it returns
-the last successful snapshot flagged `stale`, so the main window neither flashes an empty
-list nor raises a red banner, and the frontend quietly refreshes once the bridge is back.
-Re-rendering (`renderAll`) preserves the scroll positions and focus of all three scroll
-areas, so switching language no longer feels like "the UI was reset". All of this is
-covered end to end by `scripts/verify-lang-switch.py` (see Testing).
+unchanged; otherwise the window is reloaded on the spot, with the white flash covered by
+the bootstrap splash. While the reload runs the `watcher` enters a quiet period
+(shortened to just cover the next poll once the page announces ready) so that ready-state
+jitter cannot be mistaken for a dead session. Over the same window, if `/api/tasks` hits
+an unavailable bridge it returns the last successful snapshot flagged `stale`, so the
+workbench neither flashes an empty list nor raises a red banner, and refreshes once the
+bridge is back. All of this is covered end to end by `scripts/verify-lang-switch.py`
+(see Testing).
 
-`session.Watcher` probes the session page every 4 seconds: it hides the session window
-after login and brings it back when the session dies; sniffing is started automatically as
-soon as the bridge is ready. Both behaviours can be turned off in the workbench top bar.
+`session.Watcher` probes the page every 4 seconds: when the session dies mid-use it
+triggers the rate-limited reload described above; sniffing is started automatically as
+soon as the bridge is ready. The automatic recovery can be turned off in the workbench
+top bar.
 
 Testing:
 
@@ -502,27 +498,24 @@ After touching language- or theme-related code, also run the end-to-end regressi
 must be running and signed in to Google):
 
 ```bash
-python3 scripts/verify-lang-switch.py            # full run, ~70 s, 34 assertions
+python3 scripts/verify-lang-switch.py            # full run, ~70 s
 python3 scripts/verify-lang-switch.py --quick    # skips the light-theme round
 make verify                                      # same as the full run
 ```
 
 It drives the local control port and checks, in order: re-selecting the same language
-triggers no reload; switching language while the session window is hidden only swaps the
-catalogue (the session page stays put, the window is not thrown in your face, and the main
-window's data stays fresh throughout); the deferred reload is settled automatically once
-the window surfaces; switching while the window is visible reloads on the spot (the splash
-must cover the whole gap and its background must match the page background, and the main
-window keeps serving from the `/api/tasks` snapshot with no stuck requests), once in dark
-and once in light. Language, theme and window state are restored afterwards; a clean run
-exits 0.
+triggers no reload; switching theme recolours the page within two seconds without any
+reload or splash; switching language reloads on the spot (the splash must cover the whole
+gap and its background must match the page background, and `/api/tasks` keeps serving
+from the last snapshot with no stuck requests), once in dark and once in light. Language
+and theme are restored afterwards; a clean run exits 0.
 
 ## rpcid discovery workflow
 
-1. Sign in to Google normally in the **session window**; the workbench top bar should
+1. Sign in to Google normally in the **main window**; the workbench top bar should
    show `Login: yes` with values for `at`/`bl`
 2. Capturing is on by default (there is also a **Start** button)
-3. Perform an action in the session window, e.g. star a task
+3. Perform an action in the main window, e.g. star a task
 4. A record appears in the workbench's "RPC captures"; expand it to see `f.req` and the
    response, then click **Decode response** to inspect the structure
 5. Click **Generate code / Freeze as operation**: the right pane shows a compilable Go
@@ -532,7 +525,8 @@ exits 0.
    **Save as operation**
 7. Switch to the "Operation mapping" page and replay it from the **Execute** panel with
    parameters to confirm the semantics
-8. Back in the main window, the corresponding button is now live
+8. The operation is now executable from the workbench's **Execute** panel and
+   from `POST /api/ops/execute`
 
 Cover them one by one: create / delete / retitle / edit notes / due date with time /
 star / recurrence / drag to reorder (within and across lists) / add subtask / restore
@@ -570,17 +564,17 @@ recording cannot silently stop after a login redirect.
 - [ ] "All tasks" view: on wide screens the web app renders each list as a horizontal
       column; the client currently renders vertical sections (same content, better suited
       to a desktop window) — still to be decided whether to switch
-- [ ] Side-by-side comparison with the real web page to close pixel-level differences
-      (just drag the session window next to it)
+- [x] Side-by-side comparison with the real web page: the main window _is_ the real
+      web page, so pixel-level fidelity is structural rather than hand-maintained
 - [x] Three-state theme globalised: persisted by Go + native macOS appearance (title bar
-      and session page included), with a button in the session page top bar too
+      and Google page included), with a button in the Google page top bar too
 - [x] Session page desktop-ified: "Google apps" waffle removed, workbench entry added to
       the "Support" menu, "⋮" on sidebar list rows, custom context menu (Forward removed)
-- [x] Startup experience: theme-coloured first paint + session page splash, theme switching
+- [x] Startup experience: theme-coloured first paint + page splash, theme switching
       no longer reloads the page
 - [x] UI localisation: toml catalogues embedded (zh / en), language button next to the
       theme button, adding a toml adds a language
-- [x] Seamless language switching: session page reload deferred on demand
+- [x] Seamless language switching: page reload on demand, splash covers the gap
       (`langNavigator`), bridge fails fast during navigation (`MarkNavigating`), main
       window serves the previous snapshot, plus the end-to-end regression
       `scripts/verify-lang-switch.py`

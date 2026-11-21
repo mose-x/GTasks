@@ -112,9 +112,6 @@ async function refreshState() {
       state.opsReady ? "ok" : "",
     );
 
-    $("btnShowSession").textContent = state.sessionWindowVisible
-      ? t("wb.showSessionChecked", "显示会话窗口 ✓")
-      : t("wb.showSession", "显示会话窗口");
     $("chkAutoManage").checked = !!state.autoManage;
     $("chkAutoSniff").checked = state.watcher ? true : $("chkAutoSniff").checked;
   } catch (error) {
@@ -669,8 +666,6 @@ function bindUI() {
     );
   });
   $("btnProbe").addEventListener("click", probe);
-  $("btnShowSession").addEventListener("click", () => sessionAction("show"));
-  $("btnHideSession").addEventListener("click", () => sessionAction("hide"));
   $("btnReloadSession").addEventListener("click", () => sessionAction("reload"));
   $("chkAutoManage").addEventListener("change", setAutoFlags);
   $("chkAutoSniff").addEventListener("change", setAutoFlags);
