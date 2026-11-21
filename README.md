@@ -357,6 +357,7 @@ Windows 与 Linux 的**实机冒烟测试还没做**。
 ready 抖动把会话窗弹到脸上。同一时间 `/api/tasks` 若撞上桥接不可用，会垫回上一次成功的
 快照并打上 `stale` 标记，主界面不闪空列表、不甩红横幅，桥接回来后前端静默补一次。
 界面重渲染（`renderAll`）会保留三个滚动区的位置与焦点，切语言不再像「界面被重置一遍」。
+以上行为由 `scripts/verify-lang-switch.py` 做端到端回归（见「测试」一节）。
 
 `session.Watcher` 每 4 秒探测一次会话页面：登录后自动隐藏会话窗口，掉线后自动弹回来；
 桥接一就绪就自动打开抓包。两个行为都能在工作台顶栏关掉。
@@ -374,6 +375,19 @@ go test ./...
 - `internal/batchexec` 覆盖 `f.req` 编码与 `)]}'` / 分块响应解码。
 - `internal/tasks` 覆盖注册表落盘重载、模板参数替换、未配置操作的报错。
 - `internal/api` 覆盖抓包 → Go 代码生成（含 `go/format` 校验过的片段）。
+
+改语言 / 主题相关的代码，另外跑一遍端到端回归（应用要在运行、已登录 Google）：
+
+```bash
+python3 scripts/verify-lang-switch.py            # 全量，约 70 秒，34 项断言
+python3 scripts/verify-lang-switch.py --quick    # 跳过浅色主题那一轮
+```
+
+它走的是本地控制端口，依次验证：同语言重选不触发重载；会话窗收起时切语言只换词表
+（会话页原地不动、窗口不弹脸、主窗口数据全程新鲜）；窗口露面时欠着的那次重载自动
+补上；窗口可见时当场重载（启动遮罩底色必须与页面底色一致、主窗口靠 `/api/tasks`
+的存货不断供、没有卡住的请求），深色浅色各一轮。跑完把语言 / 主题 / 窗口状态还原，
+全过退出码 0。
 
 ## rpcid 发现流程
 
@@ -420,6 +434,8 @@ go test ./...
       自定义右键菜单（去掉前进）
 - [x] 启动体验：主题色首屏底色 + 会话页启动遮罩，切主题不再整页重载
 - [x] 界面多语言：toml 词表打包（zh / en），语言按钮与主题按钮并排，加 toml 即加语言
+- [x] 切语言无感化：会话页重载按需欠账（`langNavigator`）、导航期桥接快速失败
+      （`MarkNavigating`）、主窗口垫旧快照，附端到端回归 `scripts/verify-lang-switch.py`
 - [x] 抓包列表折叠「内部同步调用」噪声（临时显隐清单的副作用），可展开看原始记录
 - [x] 应用图标与 macOS 打包脚本（`build/macos-bundle.sh` / `build/macos-icon.sh`）
 - [x] Windows / Linux 桥接对齐（bootstrap 注入路径、`IsMainFrame` 过滤）+ 交叉编译验证
