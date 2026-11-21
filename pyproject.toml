@@ -1,0 +1,20 @@
+# Python 侧只服务于 scripts/ 下的回归脚本（应用本体是 Go）。
+# 这份配置的存在是为了让 code-hooks 的 python:fmt / python:lint / python:test
+# 三个阶段在不同机器上结论一致：ruff 的默认规则集会随版本漂移（0.17 起默认
+# 带上了 BLE 之类），显式钉死才不会「换台机器就红」。
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+select = [
+  "E",   # pycodestyle 错误
+  "W",   # pycodestyle 警告
+  "F",   # pyflakes
+  "B",   # bugbear：常见坑
+  "BLE", # 不许盲捕 Exception
+]
+
+[tool.pytest.ini_options]
+testpaths = ["scripts"]

@@ -1,0 +1,15 @@
+{
+  "name": "gtasks",
+  "private": true,
+  "description": "Root package.json for the code-hooks toolchain (prettier / eslint / npm test). The UI is plain browser JS under frontend/, embedded into the Go binary with go:embed, so there is no bundler and no runtime npm dependency.",
+  "scripts": {
+    "test": "echo \"no npm tests: the frontend is plain JS, internal/bridge runs bootstrap.js in Node via go test ./...\" && exit 0",
+    "fmt": "prettier --write .",
+    "fmt:check": "prettier --check .",
+    "lint": "eslint ."
+  },
+  "devDependencies": {
+    "eslint": "^10.15.0",
+    "prettier": "^3.10.1"
+  }
+}

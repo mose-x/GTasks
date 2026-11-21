@@ -109,7 +109,9 @@ class Client:
                 raw, code = response.read(), response.status
         except urllib.error.HTTPError as error:
             raw, code = error.read(), error.code
-        except Exception as error:  # 连接被拒 / 超时都算「够不着」
+        # 连接被拒 / 超时 / 对端断开都算「够不着」，统一是 OSError 家族
+        # （HTTPError 也是 OSError 子类，但上面已经先接住了）。
+        except OSError as error:
             return 0, {"error": str(error)}, (time.monotonic() - started) * 1000
         try:
             payload = json.loads(raw) if raw else {}
@@ -196,7 +198,10 @@ def record_switch(client: Client, target: str, seconds: float):
             requests.append((started - origin[0], code, stale, count, ms))
             time.sleep(0.1)
 
-    threads = [threading.Thread(target=sampler, daemon=True), threading.Thread(target=hammer, daemon=True)]
+    threads = [
+        threading.Thread(target=sampler, daemon=True),
+        threading.Thread(target=hammer, daemon=True),
+    ]
     for thread in threads:
         thread.start()
     time.sleep(0.8)
@@ -217,7 +222,13 @@ def print_timeline(timeline: list[tuple[float, dict]]) -> None:
         if "down" in sample:
             key = ("down", sample["down"])
         else:
-            key = (sample["splash"], sample["hiding"], sample["hl"], sample["shell"], sample["langButton"])
+            key = (
+                sample["splash"],
+                sample["hiding"],
+                sample["hl"],
+                sample["shell"],
+                sample["langButton"],
+            )
         if key == last:
             continue
         last = key
@@ -242,11 +253,21 @@ def check_main_window(rep: Reporter, requests: list, label: str, baseline: int) 
     empty = [row for row in requests if row[1] == 200 and row[3] != baseline]
     slow = [row for row in requests if row[4] > 3000]
     stale = [row for row in requests if row[2]]
-    rep.check(not bad, f"{label}: 主窗口全程有数据（{len(requests)} 次请求，非 200 {len(bad)} 次）",
-              str(bad[0]) if bad else f"其中 stale 垫了 {len(stale)} 次")
-    rep.check(not empty, f"{label}: 主窗口没闪空列表", f"{len(empty)} 次条数与基线 {baseline} 不符" if empty else "")
-    rep.check(not slow, f"{label}: 主窗口没有卡住的请求（>3s {len(slow)} 次）",
-              f"最慢 {max(row[4] for row in requests):.0f}ms" if requests else "")
+    rep.check(
+        not bad,
+        f"{label}: 主窗口全程有数据（{len(requests)} 次请求，非 200 {len(bad)} 次）",
+        str(bad[0]) if bad else f"其中 stale 垫了 {len(stale)} 次",
+    )
+    rep.check(
+        not empty,
+        f"{label}: 主窗口没闪空列表",
+        f"{len(empty)} 次条数与基线 {baseline} 不符" if empty else "",
+    )
+    rep.check(
+        not slow,
+        f"{label}: 主窗口没有卡住的请求（>3s {len(slow)} 次）",
+        f"最慢 {max(row[4] for row in requests):.0f}ms" if requests else "",
+    )
 
 
 def phase_same_lang(client: Client, rep: Reporter, lang: str) -> None:
@@ -307,29 +328,58 @@ def phase_show(client: Client, rep: Reporter, target: str) -> None:
         if applied is not None and state.get("ready"):
             recovered = time.monotonic() - started
             break
-    rep.check(applied is not None, "欠着的重载被补上了", f"+{applied:.1f}s" if applied else "30 秒内没发生")
-    rep.check(recovered is not None, "桥接恢复可用", f"+{recovered:.1f}s" if recovered else "未恢复")
+    rep.check(
+        applied is not None,
+        "欠着的重载被补上了",
+        f"+{applied:.1f}s" if applied else "30 秒内没发生",
+    )
+    rep.check(
+        recovered is not None,
+        "桥接恢复可用",
+        f"+{recovered:.1f}s" if recovered else "未恢复",
+    )
     rep.check(client.hl() == hl_for(target), "会话页语言与词表一致", f"hl={client.hl()}")
 
 
-def phase_visible(client: Client, rep: Reporter, target: str, label: str, baseline: int,
-                  seconds: float = 10.0) -> None:
+def phase_visible(
+    client: Client,
+    rep: Reporter,
+    target: str,
+    label: str,
+    baseline: int,
+    seconds: float = 10.0,
+) -> None:
     rep.section(f"{label} 会话窗可见时切语言（→ {target}）：当场重载，遮罩盖住全程")
     client.session("float")
     time.sleep(1.2)
     timeline, requests, switch_ms, code = record_switch(client, target, seconds)
-    rep.check(code == 200 and switch_ms < 500, "切换请求立刻返回", f"HTTP {code}，{switch_ms:.0f}ms")
+    rep.check(
+        code == 200 and switch_ms < 500,
+        "切换请求立刻返回",
+        f"HTTP {code}，{switch_ms:.0f}ms",
+    )
     print_timeline(timeline)
 
     samples = [sample for _offset, sample in timeline if "down" not in sample]
     splash_samples = [sample for sample in samples if sample["splash"]]
-    rep.check(any("down" in sample for _o, sample in timeline), "确实发生了整页重载（桥接短暂不可用）")
-    rep.check(bool(splash_samples), "启动遮罩接管了重载空档", f"命中 {len(splash_samples)} 个采样点")
+    rep.check(
+        any("down" in sample for _o, sample in timeline),
+        "确实发生了整页重载（桥接短暂不可用）",
+    )
+    rep.check(
+        bool(splash_samples),
+        "启动遮罩接管了重载空档",
+        f"命中 {len(splash_samples)} 个采样点",
+    )
     if splash_samples:
         mismatched = [s for s in splash_samples if s["splashBg"] and s["splashBg"] != s["bodyBg"]]
-        rep.check(not mismatched, "遮罩底色与页面底色一致（不闪白）",
-                  f"{mismatched[0]['splashBg']} vs {mismatched[0]['bodyBg']}" if mismatched
-                  else splash_samples[0]["splashBg"])
+        rep.check(
+            not mismatched,
+            "遮罩底色与页面底色一致（不闪白）",
+            f"{mismatched[0]['splashBg']} vs {mismatched[0]['bodyBg']}"
+            if mismatched
+            else splash_samples[0]["splashBg"],
+        )
         print(f"      遮罩文案: {splash_samples[0]['splashText']!r}")
     if samples:
         final = samples[-1]
@@ -367,8 +417,10 @@ def main() -> int:
             print("  ./build/macos-bundle.sh /tmp/GTasks.app && open /tmp/GTasks.app")
             return 2
         watcher = client.state().get("watcher") or {}
-        print("应用活着，但会话还没就绪 / 未登录：先在会话窗里登录 Google 再跑。",
-              json.dumps(watcher, ensure_ascii=False))
+        print(
+            "应用活着，但会话还没就绪 / 未登录：先在会话窗里登录 Google 再跑。",
+            json.dumps(watcher, ensure_ascii=False),
+        )
         return 2
 
     codes = client.languages()
@@ -409,8 +461,10 @@ def main() -> int:
             client.session("sink")
             client.session("hide")
             time.sleep(0.8)
-            print(f"  theme={client.theme()} lang={client.lang()} hl={client.hl()}"
-                  f" 会话窗可见={client.state().get('sessionWindowVisible')} tasks={client.tasks()[0]}")
+            print(
+                f"  theme={client.theme()} lang={client.lang()} hl={client.hl()}"
+                f" 会话窗可见={client.state().get('sessionWindowVisible')} tasks={client.tasks()[0]}"
+            )
             if not settled:
                 print(f"  注：会话窗是收起的，页面语言这笔重载欠着（hl≠{want_hl}），窗口露面时自动补上")
 

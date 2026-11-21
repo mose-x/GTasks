@@ -26,3 +26,6 @@ operations.json.local
 # Python 缓存（scripts/verify-lang-switch.py 的语法检查会产生）
 __pycache__/
 *.pyc
+
+# pytest 缓存
+.pytest_cache/

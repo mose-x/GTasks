@@ -1,0 +1,19 @@
+# prettier 只负责 JS / CSS / HTML / Markdown / YAML / JSON。
+# 显式传给它一个没有解析器的文件会直接报错，而 code-hooks 的 nodejs:fmt 阶段
+# 正是「把改动的文件原样传进来」，所以其余类型必须在这里全部挡掉：
+# Go 交给 gofmt（go:fmt 阶段），shell 用 bash -n，python 用 ruff。
+*.go
+go.mod
+go.sum
+*.sh
+*.py
+*.toml
+*.svg
+*.icns
+*.png
+Makefile
+LICENSE
+package-lock.json
+node_modules/
+build/bin/
+.pytest_cache/
