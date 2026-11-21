@@ -246,14 +246,18 @@ func main() {
 	// 重载期间由 bootstrap 的启动遮罩盖住白屏。主窗口永远在屏幕上，所以切语言
 	// 当场就载，不再像双窗口时代那样把重载欠到会话窗露面。
 	langNav := newLangNavigator(i18nManager.Lang())
+	// 导航前先给旧页盖遮罩：点击到新文档 document-start 之间有 1~3 秒网络空档，
+	// 旧页会原样冻在屏幕上，看起来像卡死；遮罩由 bootstrap 的 showSplash 同步盖上。
+	showSplashJS := "window.__gtask&&window.__gtask.showSplash&&window.__gtask.showSplash();"
 	navigateMain := func(url string) {
 		// 先把桥接标成「正在导航」：在飞的调用当场失败，后续调用直接返回
 		// ErrNotReady，工作台那边靠上一次的快照垫着，不会挂住也不会闪空。
 		sessionBridge.MarkNavigating()
-		mainWindow.ExecJS(fmt.Sprintf("location.replace(%q);", url))
+		mainWindow.ExecJS(showSplashJS + fmt.Sprintf("location.replace(%q);", url))
 	}
 	reloadMain := func() {
 		sessionBridge.MarkNavigating()
+		mainWindow.ExecJS(showSplashJS)
 		mainWindow.Reload()
 	}
 
