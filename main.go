@@ -1,9 +1,11 @@
 // Command gtasks is a Google Tasks desktop client built on Wails v3.
 //
-// The UI is served from the bundled asset server. All Google traffic runs
-// inside a second webview that is loaded from tasks.google.com itself, so the
-// user authenticates through Google's own pages and the internal batchexecute
-// RPCs are issued from that origin with the real session cookies attached.
+// The main window loads tasks.google.com itself: the interface the user sees
+// is Google's own page, dressed with a few injected controls (theme, language,
+// per-row and per-list menus). Authentication therefore happens on Google's
+// own login page, and the internal batchexecute RPCs are issued from that
+// origin with the real session cookies attached. The bundled asset server only
+// serves the control API and the reverse-engineering workbench.
 package main
 
 import (
@@ -18,7 +20,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"gtasks/internal/api"
@@ -40,14 +41,13 @@ var frontendAssets embed.FS
 var appIcon []byte
 
 const (
-	mainWindowName    = "main"
-	workbenchName     = "workbench"
-	sessionWindowName = "gsession"
-	googleTasksURL    = "https://tasks.google.com/"
-	captureRingLimit  = 3000
-	contextMenuID     = "gtasks-context"
-	themeMenuID       = "gtasks-theme"
-	langMenuID        = "gtasks-lang"
+	mainWindowName   = "main"
+	workbenchName    = "workbench"
+	googleTasksURL   = "https://tasks.google.com/"
+	captureRingLimit = 3000
+	contextMenuID    = "gtasks-context"
+	themeMenuID      = "gtasks-theme"
+	langMenuID       = "gtasks-lang"
 
 	// 窗口标题统一用产品名，不再暴露「Google 会话」这类内部叫法。
 	windowTitle          = "GTasks"
@@ -138,60 +138,46 @@ func main() {
 
 	startDark := theme.EffectiveDark(themeManager.Mode())
 
-	mainWindow := app.Window.NewWithOptions(application.WebviewWindowOptions{
-		Name:      mainWindowName,
-		Title:     windowTitle,
-		URL:       "/",
-		Width:     1180,
-		Height:    780,
-		MinWidth:  860,
-		MinHeight: 540,
-		// 首帧之前 webview 涂的就是这个颜色，深色模式下不再闪白屏。
-		BackgroundColour: rgbaOf(theme.AppBackground(startDark)),
-	})
-	applyWebviewBackgroundSoon(mainWindow, func() theme.RGB {
-		return theme.AppBackground(theme.EffectiveDark(themeManager.Mode()))
-	})
-
-	sessionOptions := application.WebviewWindowOptions{
-		Name:  sessionWindowName,
+	// 单窗口：主窗口就是内嵌的 Google 原页，桥接 / 抓包 / 注入按钮全挂在它上面；
+	// 未登录时 Google 自己的登录表单就显示在这个窗口里，不再另开登录窗。
+	mainOptions := application.WebviewWindowOptions{
+		Name:  mainWindowName,
 		Title: windowTitle,
 		URL:   tasksURLFor(i18nManager.Lang()),
 		// Wide enough for tasks.google.com to use its desktop layout. At phone
 		// widths Google switches the 所有任务 view to horizontally paged list
-		// cards, which is not what the main window reproduces.
+		// cards.
 		Width:     1200,
 		Height:    860,
-		MinWidth:  420,
+		MinWidth:  900,
 		MinHeight: 620,
 		// Re-executed after every navigation, including the redirect chain
 		// through accounts.google.com and back.
 		JS: bridge.BootstrapJS,
-		// 会话页从导航到 Google 首屏渲染完有 1~3 秒空档，底色跟主题走，
-		// 页面侧再由 bootstrap 盖一层同色的启动遮罩。
+		// 从导航到 Google 首屏渲染完有 1~3 秒空档，底色跟主题走，页面侧再由
+		// bootstrap 盖一层同色的启动遮罩。
 		BackgroundColour: rgbaOf(theme.PageBackground(startDark)),
 	}
 	if runtime.GOOS == "windows" {
 		// The Windows backend never applies WebviewWindowOptions.JS to a window
 		// created from an external URL, so start from a stub that redirects and
 		// let it register the bootstrap for the whole webview lifetime instead.
-		sessionOptions.URL = ""
-		sessionOptions.HTML = bridge.RedirectHTML(tasksURLFor(i18nManager.Lang()))
+		mainOptions.URL = ""
+		mainOptions.HTML = bridge.RedirectHTML(tasksURLFor(i18nManager.Lang()))
 	}
-	sessionWindow := app.Window.NewWithOptions(sessionOptions)
-	applyWebviewBackgroundSoon(sessionWindow, func() theme.RGB {
-		return theme.PageBackground(theme.EffectiveDark(themeManager.Mode()))
-	})
-	sessionBridge.Bind(sessionWindow)
-	apiHandler.BindWindows(mainWindow, sessionWindow)
+	mainWindow := app.Window.NewWithOptions(mainOptions)
+	// 保存的主题要在原生句柄就绪后立刻补上：窗口刚建时原生外观跟着系统走，
+	// 不等句柄就设的话，「明亮 / 暗黑」首屏会先按系统外观闪一下。
+	applyWindowThemeSoon(mainWindow, themeManager.Mode)
+	sessionBridge.Bind(mainWindow)
+	apiHandler.BindWindow(mainWindow)
 
-	// 窗口表：右键菜单靠 ContextMenuData 里的窗口名找回目标窗口，主题广播也按
-	// 名字取窗口。工作台被用户关掉后 Wails 会直接销毁它，所以表里的值允许为
-	// nil，取窗口一律走 lookupWindow。
+	// 窗口表：右键菜单靠 ContextMenuData 里的窗口名找回目标窗口，主题 / 词表
+	// 广播也按名字取窗口。工作台被用户关掉后 Wails 会直接销毁它，所以表里的值
+	// 允许为 nil，取窗口一律走 lookupWindow。
 	var windowsMu sync.Mutex
 	windowsByName := map[string]*application.WebviewWindow{
-		mainWindowName:    mainWindow,
-		sessionWindowName: sessionWindow,
+		mainWindowName: mainWindow,
 	}
 	lookupWindow := func(name string) *application.WebviewWindow {
 		windowsMu.Lock()
@@ -255,60 +241,34 @@ func main() {
 		langPicker.open(win, name, i18nManager.Lang(), x, y)
 	})
 
-	// 「会话窗收没收起来」由 sessionOnScreen 自己记账：wails 的 IsVisible 读的
-	// 是遮挡状态，被别的窗口盖住也算不可见，拿它当判据会把该载的重载一直欠着。
-	// 窗口创建时是显示的（Hidden 没置位），登录后 watcher 才把它收起来。
-	var sessionOnScreen atomic.Bool
-	sessionOnScreen.Store(true)
-	showSessionWindow := func() {
-		sessionOnScreen.Store(true)
-		sessionWindow.Show()
-	}
-	hideSessionWindow := func() {
-		sessionOnScreen.Store(false)
-		sessionWindow.Hide()
-	}
-	apiHandler.SetSessionShownHook(func(shown bool) { sessionOnScreen.Store(shown) })
-
-	// 内嵌的 Google 页面跟着换界面语言：只改我们自己的文案的话，在会话页里点
-	// 语言按钮看起来就像没反应。hl 参数是 Google 自家的界面语言开关，页面依旧是
-	// tasks.google.com 原页面。但那是一次整页重载，桥接要跟着停几秒，所以由
-	// langNav 决定这次到底要不要载：语言没变不载，窗口藏着先欠着，只有用户正
-	// 盯着会话页时才当场载（白屏由 bootstrap 的启动遮罩盖住）。
+	// 内嵌的 Google 页面跟着换界面语言：hl 参数是 Google 自家的界面语言开关，
+	// 页面依旧是 tasks.google.com 原页面，但那是一次整页重载，桥接要跟着停几秒，
+	// 重载期间由 bootstrap 的启动遮罩盖住白屏。主窗口永远在屏幕上，所以切语言
+	// 当场就载，不再像双窗口时代那样把重载欠到会话窗露面。
 	langNav := newLangNavigator(i18nManager.Lang())
-	// 自己记的账优先，再用遮挡状态兜底：万一窗口是从别的路径露出来的（比如
-	// wails 在首次导航结束后补的那次 Show），也不至于把该载的重载一直欠着。
-	sessionVisible := func() bool { return sessionOnScreen.Load() || sessionWindow.IsVisible() }
-	navigateSession := func(url string) {
+	navigateMain := func(url string) {
 		// 先把桥接标成「正在导航」：在飞的调用当场失败，后续调用直接返回
-		// ErrNotReady，主窗口那边靠上一次的快照垫着，不会挂住也不会闪空。
+		// ErrNotReady，工作台那边靠上一次的快照垫着，不会挂住也不会闪空。
 		sessionBridge.MarkNavigating()
-		sessionWindow.ExecJS(fmt.Sprintf("location.replace(%q);", url))
+		mainWindow.ExecJS(fmt.Sprintf("location.replace(%q);", url))
 	}
-	reloadSessionWindow := func() {
+	reloadMain := func() {
 		sessionBridge.MarkNavigating()
-		sessionWindow.Reload()
-	}
-	// 把欠着的那次重载补上：会话窗露面时由 WindowShow 事件和兜底轮询各调一次。
-	settleLangNav := func() {
-		if url := langNav.owed(sessionVisible); url != "" {
-			navigateSession(url)
-		}
+		mainWindow.Reload()
 	}
 
-	// 切语言后把新词表推给三个窗口：主窗口和工作台走各自的 applyI18n，会话页由
-	// bootstrap 改注入的按钮 / 菜单文案；原生右键菜单和工作台标题跟着换。
+	// 切语言后把新词表推给两个窗口：工作台走 applyI18n，Google 页由 bootstrap
+	// 改注入的按钮 / 菜单文案；原生右键菜单和工作台标题跟着换。
 	i18nManager.OnChange(func(code string) {
 		payload := string(i18nManager.Payload())
 		script := fmt.Sprintf("window.gtasksApplyI18n&&window.gtasksApplyI18n(%s);", payload)
-		mainWindow.ExecJS(script)
 		if workbench := lookupWindow(workbenchName); workbench != nil {
 			workbench.ExecJS(script)
 			workbench.SetTitle(i18nManager.T("app.workbenchTitle", workbenchWindowTitle))
 		}
-		sessionWindow.ExecJS(fmt.Sprintf("window.__gtask&&window.__gtask.setI18n(%s);", payload))
-		if url := langNav.request(code, sessionVisible); url != "" {
-			navigateSession(url)
+		mainWindow.ExecJS(fmt.Sprintf("window.__gtask&&window.__gtask.setI18n(%s);", payload))
+		if url := langNav.request(code); url != "" {
+			navigateMain(url)
 		}
 		relabelContext()
 	})
@@ -319,27 +279,22 @@ func main() {
 		themePicker.open(win, name, themeManager.Mode(), x, y)
 	})
 
-	// 主题切换后把模式推给三个窗口：主窗口和工作台改自己的 data-theme，会话页
-	// 刷新注入的主题按钮图标。页面配色全靠 prefers-color-scheme 媒体查询驱动，
-	// 原生外观一变就会立刻重算，所以这里不再重载会话页——之前每次切主题都
-	// Reload 一次，白白卡上两三秒。媒体查询确实没跟上时，页面会回报
-	// reloadForTheme，由下面那个命令兜底重载。
+	// 主题切换后把模式推给窗口：Google 页的配色全靠 prefers-color-scheme 媒体
+	// 查询驱动，原生外观一变立刻重算，不需要重载；工作台改自己的 data-theme，
+	// 并刷新 Google 页注入的主题按钮图标。媒体查询确实没跟上时（个别 WebView
+	// 不同步窗口外观），页面回报 reloadForTheme，由下面那个命令兜底重载。
 	themeManager.OnChange(func(mode theme.Mode) {
 		script := fmt.Sprintf("window.__gtasksTheme&&window.__gtasksTheme(%q);", string(mode))
-		mainWindow.ExecJS(script)
 		if workbench := lookupWindow(workbenchName); workbench != nil {
 			workbench.ExecJS(script)
 		}
 		dark := theme.EffectiveDark(mode)
-		sessionWindow.ExecJS(fmt.Sprintf("window.__gtask&&window.__gtask.setThemeMode(%q,%t);", string(mode), dark))
+		mainWindow.ExecJS(fmt.Sprintf("window.__gtask&&window.__gtask.setThemeMode(%q,%t);", string(mode), dark))
 
 		// 标题栏跟内容一起变；工作台固定深色，不参与。
-		for _, win := range []*application.WebviewWindow{mainWindow, sessionWindow} {
-			theme.ApplyWindow(win.NativeWindow(), mode)
-		}
+		theme.ApplyWindow(mainWindow.NativeWindow(), mode)
 		// webview 底色跟着换，之后万一真要重载也不会闪白屏。
-		theme.ApplyWebviewBackground(mainWindow.NativeWindow(), theme.AppBackground(dark))
-		theme.ApplyWebviewBackground(sessionWindow.NativeWindow(), theme.PageBackground(dark))
+		theme.ApplyWebviewBackground(mainWindow.NativeWindow(), theme.PageBackground(dark))
 	})
 
 	var lastThemeReload time.Time
@@ -349,27 +304,27 @@ func main() {
 			openWorkbench()
 		case "openThemeMenu":
 			x, y := commandPoint(args)
-			themePicker.open(sessionWindow, sessionWindowName, themeManager.Mode(), x, y)
+			themePicker.open(mainWindow, mainWindowName, themeManager.Mode(), x, y)
 		case "openLangMenu":
 			x, y := commandPoint(args)
-			langPicker.open(sessionWindow, sessionWindowName, i18nManager.Lang(), x, y)
+			langPicker.open(mainWindow, mainWindowName, i18nManager.Lang(), x, y)
 		case "getI18n":
-			sessionWindow.ExecJS(fmt.Sprintf("window.__gtask&&window.__gtask.setI18n(%s);",
+			mainWindow.ExecJS(fmt.Sprintf("window.__gtask&&window.__gtask.setI18n(%s);",
 				string(i18nManager.Payload())))
 		case "reloadForTheme":
 			// 页面报告 prefers-color-scheme 没跟上原生外观（个别 WebView 版本
 			// 不同步窗口外观）才走到这里；限流防止页面反复回报时无限重载。
 			if time.Since(lastThemeReload) > 10*time.Second {
 				lastThemeReload = time.Now()
-				reloadSessionWindow()
+				reloadMain()
 			}
 		case "contextMenu":
 			x, y := commandPoint(args)
-			sessionWindow.OpenContextMenu(&application.ContextMenuData{
+			mainWindow.OpenContextMenu(&application.ContextMenuData{
 				Id:   contextMenuID,
 				X:    x,
 				Y:    y,
-				Data: sessionWindowName,
+				Data: mainWindowName,
 			})
 		}
 	})
@@ -377,79 +332,50 @@ func main() {
 	// 页面每次加载完都会 announce 一次，趁机把当前主题补进注入的按钮。
 	sessionBridge.SetReadyHandler(func(json.RawMessage) {
 		mode := themeManager.Mode()
-		sessionWindow.ExecJS(fmt.Sprintf("window.__gtask&&window.__gtask.setThemeMode(%q,%t);",
+		mainWindow.ExecJS(fmt.Sprintf("window.__gtask&&window.__gtask.setThemeMode(%q,%t);",
 			string(mode), theme.EffectiveDark(mode)))
 		// 页面每次加载完都补一次词表，保证注入按钮的文案和当前语言同步。
-		sessionWindow.ExecJS(fmt.Sprintf("window.__gtask&&window.__gtask.setI18n(%s);",
+		mainWindow.ExecJS(fmt.Sprintf("window.__gtask&&window.__gtask.setI18n(%s);",
 			string(i18nManager.Payload())))
 		// 语言重载已经落地，把留给 watcher 的安静期收短。
 		langNav.settled()
 	})
 
-	// 会话窗每次露面都检查有没有欠着的一次语言重载。
-	sessionWindow.OnWindowEvent(events.Common.WindowShow, func(*application.WindowEvent) {
-		settleLangNav()
-	})
-	// 遮挡事件不一定来（macOS 上窗口被完全盖住时既不算 visible 也不派发），
-	// 再挂一个兜底轮询；只在真欠账时才去问窗口可见性，平时什么都不做。
-	go func() {
-		ticker := time.NewTicker(time.Second)
-		defer ticker.Stop()
-		for range ticker.C {
-			if langNav.waiting() {
-				settleLangNav()
-			}
-		}
-	}()
-
 	// 页面自己发起的导航（Google 内部跳转、掉线后重定向到登录页）同样要把桥接
 	// 标成正在导航，否则调用会投进一个正在拆掉的文档里干等超时。Windows 后端
-	// 没有导航开始事件，那边靠 navigateSession / reloadSessionWindow 兜住。
+	// 没有导航开始事件，那边靠 navigateMain / reloadMain 兜住。
 	for _, navigating := range []events.WindowEventType{
 		events.Mac.WebViewDidStartProvisionalNavigation,
 		events.Linux.WindowLoadStarted,
 	} {
-		sessionWindow.OnWindowEvent(navigating, func(*application.WindowEvent) {
+		mainWindow.OnWindowEvent(navigating, func(*application.WindowEvent) {
 			sessionBridge.MarkNavigating()
 		})
 	}
 
-	// Show the login window only while it is actually needed.
+	// 主窗口永远在屏幕上：未登录时 Google 自己的登录表单就显示在里面，不需要
+	// 额外弹窗。watcher 只兜一种情况——会话中途失效（cookie 或 at 被拒）：限流
+	// 重载一次，让 Google 的登录流程接管。
 	var lastRecover time.Time
 	watcher.SetChangeHandler(func(current, previous session.Status) {
-		// 语言重载期间页面会短暂掉出 ready，别把它当成掉线去 Show/Reload。
+		// 语言重载期间页面会短暂掉出 ready / 看起来未登录，别当成掉线去重载。
 		if langNav.isQuiet() {
 			return
 		}
 		if !watcher.AutoManage() {
 			return
 		}
-		switch {
-		case current.Expired && !previous.Expired:
+		if current.Expired && !previous.Expired && time.Since(lastRecover) > 3*time.Minute {
 			// The cookies or the at token died mid-use while the page still
-			// looks signed in. Surface the window and reload it so Google's
-			// own login flow takes over; rate-limit the reload so a page that
-			// keeps failing cannot loop.
-			showSessionWindow()
-			if time.Since(lastRecover) > 3*time.Minute {
-				lastRecover = time.Now()
-				reloadSessionWindow()
-			}
-		case previous.Expired && !current.Expired && current.LoggedIn:
-			hideSessionWindow()
-		case current.LoggedIn && !previous.LoggedIn:
-			hideSessionWindow()
-		case !current.LoggedIn && current.Ready:
-			showSessionWindow()
-		case !current.Ready && previous.Ready:
-			// Navigation in progress or the page died; bring it back so the
-			// user can see what Google is showing.
-			showSessionWindow()
+			// looks signed in. Reload so Google's own login flow takes over;
+			// rate-limit the reload so a page that keeps failing cannot loop.
+			lastRecover = time.Now()
+			reloadMain()
 		}
 	})
 	if os.Getenv("GTASKS_SESSION_AUTOMANAGE") == "0" {
-		// 逆向调试时让会话窗口一直留在屏幕上：页面被判定为 hidden 时 Google 的
-		// 前端不渲染，DOM 是空的，没法驱动真实操作来抓写入报文。
+		// 逆向调试时关掉自动恢复：页面被判定为 hidden 时 Google 的前端不渲染，
+		// DOM 是空的，没法驱动真实操作来抓写入报文。
 		watcher.SetAutoManage(false)
 	}
 	watcher.Start()
@@ -668,6 +594,23 @@ func applyWebviewBackgroundSoon(win *application.WebviewWindow, colour func() th
 	}()
 }
 
+// applyWindowThemeSoon 等窗口原生句柄就绪后把保存的主题补上去。窗口刚创建时
+// 原生外观跟着系统走，而主题必须赶在页面第一帧之前生效（Google 页的配色靠
+// prefers-color-scheme 媒体查询），否则「明亮 / 暗黑」会先按系统外观闪一下。
+func applyWindowThemeSoon(win *application.WebviewWindow, mode func() theme.Mode) {
+	go func() {
+		for attempt := 0; attempt < 300; attempt++ {
+			if handle := win.NativeWindow(); handle != nil {
+				current := mode()
+				theme.ApplyWindow(handle, current)
+				theme.ApplyWebviewBackground(handle, theme.PageBackground(theme.EffectiveDark(current)))
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}()
+}
+
 // themePath 是全局外观模式的持久化位置。
 func themePath(dataDir string) string {
 	if dataDir == "" {
@@ -684,56 +627,29 @@ const (
 	sessionReadyGrace  = 6 * time.Second
 )
 
-// langNavigator 决定一次语言切换要不要真的重载会话页。
-//
-// 会话页既是内嵌的 Google 界面，也是唯一的数据通道：整页重载要几秒，期间桥接
-// 不可用。而它平时是藏着的，用户根本看不见它是哪门语言。所以语言没变就不重载，
-// 窗口藏着就先把这笔账欠着，等它真露出面再补——主窗口这边只换文案，全程无感。
+// langNavigator 记录 Google 页当前实际加载的语言，并给整页重载留一段安静期：
+// 重载引起的 ready / 登录态抖动不要去触发 watcher 的自动恢复。
 type langNavigator struct {
 	mu       sync.Mutex
-	page     string // 会话页当前实际加载的语言
-	want     string // 用户选定的语言
+	page     string // Google 页当前实际加载的语言
 	quietTil time.Time
 }
 
 func newLangNavigator(lang string) *langNavigator {
-	return &langNavigator{page: lang, want: lang}
+	return &langNavigator{page: lang}
 }
 
-// request 记录用户选的语言，返回需要立刻导航的地址；空串表示这次不用重载。
-func (n *langNavigator) request(code string, visible func() bool) string {
-	n.mu.Lock()
-	n.want = code
-	n.mu.Unlock()
-	return n.owed(visible)
-}
-
-// owed 结清欠着的重载：语言已经一致、或窗口还藏着，都返回空串。visible 只在
-// 确实欠账时才调用——启动时 OnChange 会先回调一次，那会儿窗口还没建好，问它
-// 可见性会把主线程卡住。
-func (n *langNavigator) owed(visible func() bool) string {
-	if !n.waiting() {
-		return ""
-	}
-	if visible != nil && !visible() {
-		return ""
-	}
+// request 记录用户选的语言，返回需要立刻导航的地址；语言没变返回空串。
+// 主窗口永远在屏幕上，所以这里不做「欠账」：选了新语言当场就载。
+func (n *langNavigator) request(code string) string {
 	n.mu.Lock()
 	defer n.mu.Unlock()
-	if n.want == n.page {
+	if code == n.page {
 		return ""
 	}
-	url := tasksURLFor(n.want)
-	n.page = n.want
+	n.page = code
 	n.quietTil = time.Now().Add(sessionQuietWindow)
-	return url
-}
-
-// waiting 报告是否还欠着一次重载，兜底轮询用它跳过无谓的窗口可见性查询。
-func (n *langNavigator) waiting() bool {
-	n.mu.Lock()
-	defer n.mu.Unlock()
-	return n.want != n.page
+	return tasksURLFor(code)
 }
 
 // settled 在页面 announce 就绪后调用：重载已经落地，把安静期收短。
@@ -745,8 +661,8 @@ func (n *langNavigator) settled() {
 	}
 }
 
-// isQuiet 报告 watcher 现在是否该保持安静：重载引起的 ready 抖动不要去
-// Show/Hide 会话窗，否则在主窗口里点一下语言，会话窗会突然弹到脸上。
+// isQuiet 报告 watcher 现在是否该保持安静：重载引起的 ready 抖动不要去触发
+// 自动恢复，否则切一下语言页面就被白白重载第二次。
 func (n *langNavigator) isQuiet() bool {
 	n.mu.Lock()
 	defer n.mu.Unlock()

@@ -92,14 +92,14 @@ func TestPlaceholdersMatch(t *testing.T) {
 func TestMessagesFallBackPerKey(t *testing.T) {
 	bundle := Load()
 	merged := bundle.Messages("en")
-	if merged["main.title"] == "" {
-		t.Fatal("英文词表应能取到 main.title")
+	if merged["app.workbenchTitle"] == "" {
+		t.Fatal("英文词表应能取到 app.workbenchTitle")
 	}
 	// 不存在的语言整份回落到兜底语言。
-	if bundle.Messages("jp")["main.title"] == "" {
+	if bundle.Messages("jp")["app.workbenchTitle"] == "" {
 		t.Fatal("未知语言应回落到兜底语言的词表")
 	}
-	if got := bundle.T("jp", "main.title", "字面量"); got != bundle.messages[bundle.fallback]["main.title"] {
+	if got := bundle.T("jp", "app.workbenchTitle", "字面量"); got != bundle.messages[bundle.fallback]["app.workbenchTitle"] {
 		t.Fatalf("未知语言应先查兜底语言的词表，实际 %q", got)
 	}
 	if got := bundle.T("en", "no.such.key", "兜底"); got != "兜底" {
@@ -166,7 +166,7 @@ func TestPayloadShape(t *testing.T) {
 	if len(payload.Items) != len(manager.Bundle().Codes()) {
 		t.Fatalf("切换菜单项应与打包的语言数一致：%v", payload.Items)
 	}
-	if payload.Messages["main.title"] == "" {
+	if payload.Messages["app.workbenchTitle"] == "" {
 		t.Fatal("Payload 应带整份词表")
 	}
 }
