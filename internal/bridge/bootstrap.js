@@ -665,7 +665,8 @@
   //   3. 「支持」菜单里的「帮助」原地改造成「GTasks 工作台」并挪到末尾
   //      （桌面客户端里帮助页没有意义，正好腾出这一项）；
   //   4. 侧栏每个任务列表行加「列表选项」入口，点的还是 Google 自己的菜单，
-  //      但菜单会被挪到 ⋮ 正下方，且不会顺带把清单切走；
+  //      菜单原地弹在 ⋮ 正下方（消掉 Google 浮层的位移过渡，不再「漂移」）；
+  //      未勾选的清单走「临时显示再还原」，勾选状态全程不变；
   //   5. 右键统一交给 Go 弹原生菜单（WebKit 默认菜单带前进/后退，用不上）；
   //   6. 页面首屏渲染出来之前盖一层与主题同色的启动遮罩，不闪白屏。
   //
@@ -722,6 +723,12 @@
       ".gtasks-rowmenu:hover { background: rgba(128,134,139,.18); }",
       // 悬停时把计数让位给「列表选项」，避免两个元素叠在一起。
       'li[data-task-list-id]:hover > span[jsname="orbTae"] { visibility: hidden; }'
+      ,
+      // 临时显示未勾选清单时，侧栏行要看起来和没勾一样：遮掉勾选 glyph 和
+      // 填充底色，空框保留（属性由 openListOptions 挂/摘）。
+      'li[data-gtasks-tempshow] .KGC9Kd-HUofsb { visibility: hidden !important; }',
+      'li[data-gtasks-tempshow] .KGC9Kd-MPu53c { background-color: transparent !important; box-shadow: none !important; }',
+      'li[data-gtasks-tempshow] .KGC9Kd-YQoJzd { background-color: transparent !important; }'
     ].join("\n");
     (document.head || document.documentElement).appendChild(style);
   }
@@ -862,69 +869,75 @@
   // "<清单id>_label"，侧栏行上的 data-task-list-id 与之对应。
   function listOptionsButton(listId) {
     if (!listId) return null;
-    var heading = document.getElementById(listId + "_label");
-    if (!heading) return null;
-    var section = heading.parentElement;
-    for (var depth = 0; section && depth < 8; depth++) {
-      var button = section.querySelector(LIST_OPTIONS_SELECTOR);
-      if (button) return button;
-      section = section.parentElement;
-    }
-    return null;
+    var section = listSection(listId);
+    return section ? section.querySelector(LIST_OPTIONS_SELECTOR) : null;
   }
 
-  function visiblePopMenus() {
+  // 有布局盒子的浮层菜单（不管可不可见）：打开流程里菜单先被全局隐藏，
+  // 靠 visibility 判断会漏掉刚弹出来的那个。
+  function laidOutPopMenus() {
     var found = [];
     var menus = document.querySelectorAll(POPUP_MENU_SELECTOR);
     for (var index = 0; index < menus.length; index++) {
       var rect = menus[index].getBoundingClientRect();
-      if (rect.width > 0 && rect.height > 0 && getComputedStyle(menus[index]).visibility !== "hidden") {
-        found.push(menus[index]);
-      }
+      if (rect.width > 0 && rect.height > 0) found.push(menus[index]);
     }
     return found;
   }
 
-  // 菜单打开后把它挪到 ⋮ 正下方：Google 的「列表选项」按钮长在内容区顶部，
-  // 不挪的话菜单会弹到离鼠标很远的地方。
-  function anchorMenu(menu, anchor) {
-    var apply = function () {
-      var parent = menu.offsetParent || document.body;
-      var parentRect = parent.getBoundingClientRect();
-      var width = menu.offsetWidth;
-      var height = menu.offsetHeight;
-      var top = anchor.bottom + 4;
-      if (top + height > window.innerHeight - 8) {
-        var above = anchor.top - height - 4;
-        top = above >= 8 ? above : Math.max(8, window.innerHeight - height - 8);
-      }
-      var available = window.innerHeight - top - 8;
-      if (height > available) menu.style.maxHeight = Math.max(120, available) + "px";
-      var left = Math.min(Math.max(8, anchor.right - width), Math.max(8, window.innerWidth - width - 8));
-      menu.style.left = Math.round(left - parentRect.left) + "px";
-      menu.style.top = Math.round(top - parentRect.top) + "px";
-    };
-    apply();
-    // Google 的浮层有 ~300ms 的展开动画，期间 offsetWidth 还在变、定位会被它
-    // 自己的动画盖掉，所以要连着覆盖到动画结束；45 帧之后放手，免得和它自己
-    // 的滚动跟随一直打架。
-    var frames = 0;
-    var tick = function () {
-      frames += 1;
-      if (!menu.isConnected || frames > 45 || !window.requestAnimationFrame) return;
-      apply();
-      window.requestAnimationFrame(tick);
-    };
-    if (window.requestAnimationFrame) window.requestAnimationFrame(tick);
+  function menuHideRuleOn() {
+    if (document.getElementById("gtasks-menu-hide")) return;
+    var style = document.createElement("style");
+    style.id = "gtasks-menu-hide";
+    style.textContent = 'div[role="menu"] { visibility: hidden !important; }';
+    (document.head || document.documentElement).appendChild(style);
   }
 
-  // 轮询等新弹出来的那个浮层（点击前已经可见的要排除掉）。
-  function moveMenuTo(previous, anchor) {
-    if (!anchor) return;
+  function menuHideRuleOff() {
+    var style = document.getElementById("gtasks-menu-hide");
+    if (style && style.parentNode) style.parentNode.removeChild(style);
+  }
+
+  // 把菜单摆到 ⋮ 正下方（右对齐，放不下就翻到上方）。Google 的「列表选项」
+  // 按钮长在内容区顶部，不摆的话菜单会弹到离鼠标很远的地方。
+  function positionMenu(menu, anchor) {
+    var parent = menu.offsetParent || document.body;
+    var parentRect = parent.getBoundingClientRect();
+    var width = menu.offsetWidth;
+    var height = menu.offsetHeight;
+    var top = anchor.bottom + 4;
+    if (top + height > window.innerHeight - 8) {
+      var above = anchor.top - height - 4;
+      top = above >= 8 ? above : Math.max(8, window.innerHeight - height - 8);
+    }
+    var available = window.innerHeight - top - 8;
+    if (height > available) menu.style.maxHeight = Math.max(120, available) + "px";
+    // 菜单内容是异步填出来的，宽度前几百毫秒还在长：右对齐会让左边缘跟着
+    // 宽度一跳一跳。左边缘首帧定死，之后只跟纵向，横向不再动。
+    var left;
+    if (menu.dataset.gtasksLeft) {
+      left = parseFloat(menu.dataset.gtasksLeft);
+    } else {
+      left = Math.min(Math.max(8, anchor.right - width), Math.max(8, window.innerWidth - width - 8));
+      menu.dataset.gtasksLeft = String(left);
+    }
+    menu.style.left = Math.round(left - parentRect.left) + "px";
+    menu.style.top = Math.round(top - parentRect.top) + "px";
+  }
+
+  // Google 的浮层自带 left/top 0.2s 过渡：菜单先落在它自己的默认坐标，我们再
+  // 改坐标就会看到它从别处「漂移」过来。所以打开过程分三步：点之前给所有
+  // div[role=menu] 盖 visibility:hidden，保证菜单第一帧不会画在默认坐标上；
+  // 逮到新菜单先掐掉 left/top 过渡、写好我们的坐标，再撤隐藏，用户看到的就是
+  // 原地弹出；几百毫秒后把过渡还回去，滚动跟随之类的原生行为不受影响。
+  function clickListOptions(target, anchor, onOpen) {
+    var previous = laidOutPopMenus();
+    menuHideRuleOn();
+    target.click();
     var tries = 0;
     var timer = setInterval(function () {
       tries += 1;
-      var menus = visiblePopMenus();
+      var menus = laidOutPopMenus();
       var fresh = null;
       for (var index = 0; index < menus.length; index++) {
         if (previous.indexOf(menus[index]) < 0) {
@@ -935,17 +948,88 @@
       if (!fresh && menus.length === 1) fresh = menus[0];
       if (fresh) {
         clearInterval(timer);
-        anchorMenu(fresh, anchor);
+        delete fresh.dataset.gtasksLeft;
+        fresh.style.transition = "none";
+        positionMenu(fresh, anchor);
+        menuHideRuleOff();
+        // 展开动画期间 offsetWidth 还在变，补几帧坐标（过渡已掐掉，不会滑）。
+        var frames = 0;
+        var tick = function () {
+          frames += 1;
+          if (!fresh.isConnected || frames > 12 || !window.requestAnimationFrame) return;
+          positionMenu(fresh, anchor);
+          window.requestAnimationFrame(tick);
+        };
+        if (window.requestAnimationFrame) window.requestAnimationFrame(tick);
+        setTimeout(function () {
+          if (fresh.isConnected) fresh.style.transition = "";
+        }, 400);
+        if (onOpen) onOpen(fresh);
       } else if (tries > 25) {
         clearInterval(timer);
+        menuHideRuleOff();
       }
     }, 16);
   }
 
-  function clickListOptions(target, anchor) {
-    var previous = visiblePopMenus();
-    target.click();
-    moveMenuTo(previous, anchor);
+  // 等浮层关闭（节点移除或不再可见），用于临时显示清单的收尾。
+  function watchMenuClose(menu, onClosed) {
+    var timer = setInterval(function () {
+      var rect = menu.getBoundingClientRect();
+      var gone = !menu.isConnected || rect.width === 0 || rect.height === 0 ||
+        getComputedStyle(menu).visibility === "hidden";
+      if (!gone) return;
+      clearInterval(timer);
+      onClosed();
+    }, 150);
+    setTimeout(function () { clearInterval(timer); }, 120000);
+  }
+
+  function listSection(listId) {
+    var heading = document.getElementById(listId + "_label");
+    if (!heading) return null;
+    var section = heading.parentElement;
+    for (var depth = 0; section && depth < 8; depth++) {
+      // 要走到「整列卡片」那一层：标题行自己就含着「列表选项」按钮，只走到
+      // 标题行的话离屏停放会漏掉列身，看板上留下一列没头的内容。
+      if (section.querySelector(LIST_OPTIONS_SELECTOR) && section.querySelector('[role="list"]')) return section;
+      section = section.parentElement;
+    }
+    return null;
+  }
+
+  // 临时显示出来的列整块踢到屏幕外：absolute 脱流后看板不会多出一列、也不
+  // 会挤动别的列，而渲染盒子还在（display:none 会让 Google 的菜单打不开）。
+  function parkColumn(section) {
+    if (!section) return;
+    section.style.position = "absolute";
+    section.style.left = "-10000px";
+    section.style.top = "0";
+  }
+
+  function unparkColumn(section) {
+    if (!section || !section.isConnected) return;
+    section.style.position = "";
+    section.style.left = "";
+    section.style.top = "";
+  }
+
+  // 临时显示期间把侧栏行伪装成未勾选：只遮勾选 glyph 和填充底色，空框还在。
+  function restoreTempShownList(listId, observer) {
+    if (observer) observer.disconnect();
+    var current = rowForList(listId);
+    if (current) current.removeAttribute("data-gtasks-tempshow");
+    // checkbox 的 checked 属性和真实显隐并不同步（Google 自己维护），以「列还在
+    // 不在」为准：列还在说明是我们临时显示的、用户中途没动过，再点一次藏回去；
+    // 列已经没了（用户手动藏了 / 清单被删了）就别再多点那一下。
+    if (current && document.getElementById(listId + "_label")) current.click();
+    setTimeout(function () { unparkColumn(listSection(listId)); }, 400);
+  }
+
+  // 显隐清单时 Google 会整块替换侧栏行的 li 节点，闭包里攥着的 row 随时可能
+  // 脱管：一律按 listId 现取。
+  function rowForList(listId) {
+    return document.querySelector(LIST_ROW_SELECTOR + '[data-task-list-id="' + listId + '"]');
   }
 
   function openListOptions(listId, anchor) {
@@ -954,10 +1038,23 @@
       clickListOptions(button, anchor);
       return;
     }
-    var row = document.querySelector(LIST_ROW_SELECTOR + '[data-task-list-id="' + listId + '"]');
+    var row = rowForList(listId);
     if (!row) return;
-    // 该清单当前没在内容区渲染（多列视图只渲染选中的）：先切过去，等内容区
-    // 出来再点它自己的「列表选项」，菜单内容和手工点完全一致。
+    // 该清单当前没在内容区渲染（多列视图只渲染勾选的），Google 自己没有入口：
+    // 借「先勾选再点菜单」这条路，但全程不让用户看出来——列节点一插入就踢到
+    // 屏幕外（MutationObserver 回调在本帧绘制前跑），侧栏勾选 glyph 遮掉，
+    // 菜单关了再取消勾选、还原样式，选中状态和点之前完全一致。
+    var observer = new MutationObserver(function () {
+      var section = listSection(listId);
+      if (section && section.style.left !== "-10000px") parkColumn(section);
+      // 行节点被 Google 换掉时把遮罩属性补到新节点上，侧栏才一直像没勾一样。
+      var current = rowForList(listId);
+      if (current && !current.hasAttribute("data-gtasks-tempshow")) {
+        current.setAttribute("data-gtasks-tempshow", "1");
+      }
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+    row.setAttribute("data-gtasks-tempshow", "1");
     row.click();
     var tries = 0;
     var timer = setInterval(function () {
@@ -965,9 +1062,14 @@
       var target = listOptionsButton(listId);
       if (target) {
         clearInterval(timer);
-        clickListOptions(target, anchor);
+        clickListOptions(target, anchor, function (menu) {
+          watchMenuClose(menu, function () {
+            restoreTempShownList(listId, observer);
+          });
+        });
       } else if (tries > 25) {
         clearInterval(timer);
+        restoreTempShownList(listId, observer);
       }
     }, 80);
   }
