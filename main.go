@@ -145,7 +145,7 @@ func main() {
 	sessionOptions := application.WebviewWindowOptions{
 		Name:  sessionWindowName,
 		Title: windowTitle,
-		URL:   googleTasksURL,
+		URL:   tasksURLFor(i18nManager.Lang()),
 		// Wide enough for tasks.google.com to use its desktop layout. At phone
 		// widths Google switches the 所有任务 view to horizontally paged list
 		// cards, which is not what the main window reproduces.
@@ -165,7 +165,7 @@ func main() {
 		// created from an external URL, so start from a stub that redirects and
 		// let it register the bootstrap for the whole webview lifetime instead.
 		sessionOptions.URL = ""
-		sessionOptions.HTML = bridge.RedirectHTML(googleTasksURL)
+		sessionOptions.HTML = bridge.RedirectHTML(tasksURLFor(i18nManager.Lang()))
 	}
 	sessionWindow := app.Window.NewWithOptions(sessionOptions)
 	applyWebviewBackgroundSoon(sessionWindow, func() theme.RGB {
@@ -236,6 +236,8 @@ func main() {
 
 	relabelContext := newContextMenu(lookupWindow, i18nManager)
 
+	apiHandler.SetWindowLookup(lookupWindow)
+
 	langPicker := newLangMenu(i18nManager.Bundle(), func(code string) { i18nManager.Set(code) })
 	apiHandler.SetLangMenuOpener(func(source string, x, y int) {
 		win, name := menuWindow(lookupWindow, source)
@@ -244,7 +246,7 @@ func main() {
 
 	// 切语言后把新词表推给三个窗口：主窗口和工作台走各自的 applyI18n，会话页由
 	// bootstrap 改注入的按钮 / 菜单文案；原生右键菜单和工作台标题跟着换。
-	i18nManager.OnChange(func(string) {
+	i18nManager.OnChange(func(code string) {
 		payload := string(i18nManager.Payload())
 		script := fmt.Sprintf("window.gtasksApplyI18n&&window.gtasksApplyI18n(%s);", payload)
 		mainWindow.ExecJS(script)
@@ -253,6 +255,10 @@ func main() {
 			workbench.SetTitle(i18nManager.T("app.workbenchTitle", workbenchWindowTitle))
 		}
 		sessionWindow.ExecJS(fmt.Sprintf("window.__gtask&&window.__gtask.setI18n(%s);", payload))
+		// 内嵌的 Google 页面跟着换界面语言：只改我们自己的文案的话，在会话页
+		// 里点语言按钮看起来就像没反应。hl 参数是 Google 自家的界面语言开关，
+		// 页面依旧是 tasks.google.com 原页面。
+		sessionWindow.ExecJS(fmt.Sprintf("location.replace(%q);", tasksURLFor(code)))
 		relabelContext()
 	})
 
@@ -583,6 +589,23 @@ func themePath(dataDir string) string {
 		return ""
 	}
 	return filepath.Join(dataDir, "theme.txt")
+}
+
+// googleHL 把词表语言码映射成 Google 的界面语言参数值；没收录的语言直接把
+// 语言码原样传给 hl（Google 不认时会回落到账号语言，不会报错）。
+var googleHL = map[string]string{
+	"zh": "zh-CN",
+	"jp": "ja",
+}
+
+// tasksURLFor 给会话页地址挂上界面语言参数，让内嵌的 Google 页面跟应用语言走。
+func tasksURLFor(lang string) string {
+	hl, ok := googleHL[lang]
+	if !ok {
+		hl = lang
+	}
+	// hl 挂在 /tasks/ 路径上：根路径的重定向会把查询参数丢掉。
+	return googleTasksURL + "tasks/?hl=" + hl
 }
 
 // langPath 是界面语言的持久化位置，与主题同一个数据目录。

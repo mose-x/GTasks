@@ -230,7 +230,11 @@ type Handler struct {
 	sessionWin *application.WebviewWindow
 	themeMenu  ThemeMenuOpener
 	langMenu   LangMenuOpener
+	winLookup  WindowLookup
 }
+
+// WindowLookup 按名字取窗口（工作台是懒创建的，API 侧拿不到直接引用）。
+type WindowLookup func(name string) *application.WebviewWindow
 
 // ThemeMenuOpener 在调用方指定的 webview 坐标处弹出主题单选菜单。由 main 注入，
 // 这样前端按钮点下去弹的是原生菜单，和会话页顶栏那颗按钮行为一致。
@@ -297,6 +301,13 @@ func (h *Handler) BindWindows(mainWin, sessionWin *application.WebviewWindow) {
 func (h *Handler) SetThemeMenuOpener(opener ThemeMenuOpener) {
 	h.mu.Lock()
 	h.themeMenu = opener
+	h.mu.Unlock()
+}
+
+// SetWindowLookup 注入按名字取窗口的实现，供 /api/eval 定向到主窗口 / 工作台。
+func (h *Handler) SetWindowLookup(lookup WindowLookup) {
+	h.mu.Lock()
+	h.winLookup = lookup
 	h.mu.Unlock()
 }
 
@@ -529,7 +540,8 @@ func (h *Handler) handleSniffPost(w http.ResponseWriter, r *http.Request) {
 // handleEval 在会话页面里执行一段脚本，供逆向时查看全局对象或驱动只读交互。
 func (h *Handler) handleEval(w http.ResponseWriter, r *http.Request) {
 	var request struct {
-		JS string `json:"js"`
+		JS     string `json:"js"`
+		Window string `json:"window"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 		writeError(w, http.StatusBadRequest, "请求体不是合法 JSON")
@@ -539,6 +551,32 @@ func (h *Handler) handleEval(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "js 不能为空")
 		return
 	}
+	// 主窗口 / 工作台没有桥接通道，只能 fire-and-forget 地 ExecJS；调试脚本自己
+	// 把结果写回（比如改 document.title 或 fetch 回来）。
+	h.mu.RLock()
+	lookup := h.winLookup
+	h.mu.RUnlock()
+	var target *application.WebviewWindow
+	switch request.Window {
+	case "main":
+		h.mu.RLock()
+		target = h.mainWin
+		h.mu.RUnlock()
+	case "workbench":
+		if lookup != nil {
+			target = lookup("workbench")
+		}
+	case "", "session":
+	default:
+		writeError(w, http.StatusBadRequest, "window 只能是 session / main / workbench")
+		return
+	}
+	if target != nil {
+		target.ExecJS(request.JS)
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "window": request.Window})
+		return
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
 	defer cancel()
 
