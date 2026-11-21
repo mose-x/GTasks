@@ -118,6 +118,39 @@ func TestCallReportsUnboundBridge(t *testing.T) {
 	}
 }
 
+// 页面一开始导航，桥接就必须立刻不可用：在飞的调用当场失败（Call 把 nil 回执
+// 当作 ErrNoReply），后来的调用直接 ErrNotReady。否则调用会投进正在拆掉的文档，
+// 干等到 30 秒超时，主界面读数据就挂住了。
+func TestMarkNavigatingFailsInflightCalls(t *testing.T) {
+	br := New()
+	br.window = &application.WebviewWindow{}
+
+	waiter := make(chan *envelope, 1)
+	br.pending[7] = waiter
+	br.stateMu.Lock()
+	br.ready = true
+	br.stateMu.Unlock()
+
+	br.MarkNavigating()
+
+	if br.Ready() {
+		t.Fatal("导航开始后不该再报告就绪")
+	}
+	if _, err := br.Call(context.Background(), "probe", nil); !errors.Is(err, ErrNotReady) {
+		t.Fatalf("导航期间应立即返回 ErrNotReady，实到: %v", err)
+	}
+	select {
+	case reply := <-waiter:
+		if reply != nil {
+			t.Fatalf("在飞的调用应该被掐掉（nil 回执），实到: %v", reply)
+		}
+	default:
+		t.Fatal("在飞的调用没有收到回执")
+	}
+	if len(br.pending) != 0 {
+		t.Fatalf("在飞的调用应该从表里摘掉，实际还剩 %d 条", len(br.pending))
+	}
+}
 func TestRedirectHTMLQuotesTarget(t *testing.T) {
 	html := RedirectHTML("https://tasks.google.com/")
 	if !strings.HasPrefix(html, "<!doctype html>") {

@@ -18,6 +18,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"gtasks/internal/api"
@@ -244,6 +245,47 @@ func main() {
 		langPicker.open(win, name, i18nManager.Lang(), x, y)
 	})
 
+	// 「会话窗收没收起来」由 sessionOnScreen 自己记账：wails 的 IsVisible 读的
+	// 是遮挡状态，被别的窗口盖住也算不可见，拿它当判据会把该载的重载一直欠着。
+	// 窗口创建时是显示的（Hidden 没置位），登录后 watcher 才把它收起来。
+	var sessionOnScreen atomic.Bool
+	sessionOnScreen.Store(true)
+	showSessionWindow := func() {
+		sessionOnScreen.Store(true)
+		sessionWindow.Show()
+	}
+	hideSessionWindow := func() {
+		sessionOnScreen.Store(false)
+		sessionWindow.Hide()
+	}
+	apiHandler.SetSessionShownHook(func(shown bool) { sessionOnScreen.Store(shown) })
+
+	// 内嵌的 Google 页面跟着换界面语言：只改我们自己的文案的话，在会话页里点
+	// 语言按钮看起来就像没反应。hl 参数是 Google 自家的界面语言开关，页面依旧是
+	// tasks.google.com 原页面。但那是一次整页重载，桥接要跟着停几秒，所以由
+	// langNav 决定这次到底要不要载：语言没变不载，窗口藏着先欠着，只有用户正
+	// 盯着会话页时才当场载（白屏由 bootstrap 的启动遮罩盖住）。
+	langNav := newLangNavigator(i18nManager.Lang())
+	// 自己记的账优先，再用遮挡状态兜底：万一窗口是从别的路径露出来的（比如
+	// wails 在首次导航结束后补的那次 Show），也不至于把该载的重载一直欠着。
+	sessionVisible := func() bool { return sessionOnScreen.Load() || sessionWindow.IsVisible() }
+	navigateSession := func(url string) {
+		// 先把桥接标成「正在导航」：在飞的调用当场失败，后续调用直接返回
+		// ErrNotReady，主窗口那边靠上一次的快照垫着，不会挂住也不会闪空。
+		sessionBridge.MarkNavigating()
+		sessionWindow.ExecJS(fmt.Sprintf("location.replace(%q);", url))
+	}
+	reloadSessionWindow := func() {
+		sessionBridge.MarkNavigating()
+		sessionWindow.Reload()
+	}
+	// 把欠着的那次重载补上：会话窗露面时由 WindowShow 事件和兜底轮询各调一次。
+	settleLangNav := func() {
+		if url := langNav.owed(sessionVisible); url != "" {
+			navigateSession(url)
+		}
+	}
+
 	// 切语言后把新词表推给三个窗口：主窗口和工作台走各自的 applyI18n，会话页由
 	// bootstrap 改注入的按钮 / 菜单文案；原生右键菜单和工作台标题跟着换。
 	i18nManager.OnChange(func(code string) {
@@ -255,10 +297,9 @@ func main() {
 			workbench.SetTitle(i18nManager.T("app.workbenchTitle", workbenchWindowTitle))
 		}
 		sessionWindow.ExecJS(fmt.Sprintf("window.__gtask&&window.__gtask.setI18n(%s);", payload))
-		// 内嵌的 Google 页面跟着换界面语言：只改我们自己的文案的话，在会话页
-		// 里点语言按钮看起来就像没反应。hl 参数是 Google 自家的界面语言开关，
-		// 页面依旧是 tasks.google.com 原页面。
-		sessionWindow.ExecJS(fmt.Sprintf("location.replace(%q);", tasksURLFor(code)))
+		if url := langNav.request(code, sessionVisible); url != "" {
+			navigateSession(url)
+		}
 		relabelContext()
 	})
 
@@ -310,7 +351,7 @@ func main() {
 			// 不同步窗口外观）才走到这里；限流防止页面反复回报时无限重载。
 			if time.Since(lastThemeReload) > 10*time.Second {
 				lastThemeReload = time.Now()
-				sessionWindow.Reload()
+				reloadSessionWindow()
 			}
 		case "contextMenu":
 			x, y := commandPoint(args)
@@ -331,11 +372,45 @@ func main() {
 		// 页面每次加载完都补一次词表，保证注入按钮的文案和当前语言同步。
 		sessionWindow.ExecJS(fmt.Sprintf("window.__gtask&&window.__gtask.setI18n(%s);",
 			string(i18nManager.Payload())))
+		// 语言重载已经落地，把留给 watcher 的安静期收短。
+		langNav.settled()
 	})
+
+	// 会话窗每次露面都检查有没有欠着的一次语言重载。
+	sessionWindow.OnWindowEvent(events.Common.WindowShow, func(*application.WindowEvent) {
+		settleLangNav()
+	})
+	// 遮挡事件不一定来（macOS 上窗口被完全盖住时既不算 visible 也不派发），
+	// 再挂一个兜底轮询；只在真欠账时才去问窗口可见性，平时什么都不做。
+	go func() {
+		ticker := time.NewTicker(time.Second)
+		defer ticker.Stop()
+		for range ticker.C {
+			if langNav.waiting() {
+				settleLangNav()
+			}
+		}
+	}()
+
+	// 页面自己发起的导航（Google 内部跳转、掉线后重定向到登录页）同样要把桥接
+	// 标成正在导航，否则调用会投进一个正在拆掉的文档里干等超时。Windows 后端
+	// 没有导航开始事件，那边靠 navigateSession / reloadSessionWindow 兜住。
+	for _, navigating := range []events.WindowEventType{
+		events.Mac.WebViewDidStartProvisionalNavigation,
+		events.Linux.WindowLoadStarted,
+	} {
+		sessionWindow.OnWindowEvent(navigating, func(*application.WindowEvent) {
+			sessionBridge.MarkNavigating()
+		})
+	}
 
 	// Show the login window only while it is actually needed.
 	var lastRecover time.Time
 	watcher.SetChangeHandler(func(current, previous session.Status) {
+		// 语言重载期间页面会短暂掉出 ready，别把它当成掉线去 Show/Reload。
+		if langNav.isQuiet() {
+			return
+		}
 		if !watcher.AutoManage() {
 			return
 		}
@@ -345,21 +420,21 @@ func main() {
 			// looks signed in. Surface the window and reload it so Google's
 			// own login flow takes over; rate-limit the reload so a page that
 			// keeps failing cannot loop.
-			sessionWindow.Show()
+			showSessionWindow()
 			if time.Since(lastRecover) > 3*time.Minute {
 				lastRecover = time.Now()
-				sessionWindow.Reload()
+				reloadSessionWindow()
 			}
 		case previous.Expired && !current.Expired && current.LoggedIn:
-			sessionWindow.Hide()
+			hideSessionWindow()
 		case current.LoggedIn && !previous.LoggedIn:
-			sessionWindow.Hide()
+			hideSessionWindow()
 		case !current.LoggedIn && current.Ready:
-			sessionWindow.Show()
+			showSessionWindow()
 		case !current.Ready && previous.Ready:
 			// Navigation in progress or the page died; bring it back so the
 			// user can see what Google is showing.
-			sessionWindow.Show()
+			showSessionWindow()
 		}
 	})
 	if os.Getenv("GTASKS_SESSION_AUTOMANAGE") == "0" {
@@ -589,6 +664,83 @@ func themePath(dataDir string) string {
 		return ""
 	}
 	return filepath.Join(dataDir, "theme.txt")
+}
+
+// 会话页重载期间留给 watcher 的安静窗口。sessionQuietWindow 是上限（页面万一
+// 起不来，超过它 watcher 就恢复正常工作，该弹登录窗照样弹）；页面一旦 announce
+// 就绪，settled 会把它收短到 sessionReadyGrace，刚好盖过 watcher 的下一轮轮询。
+const (
+	sessionQuietWindow = 20 * time.Second
+	sessionReadyGrace  = 6 * time.Second
+)
+
+// langNavigator 决定一次语言切换要不要真的重载会话页。
+//
+// 会话页既是内嵌的 Google 界面，也是唯一的数据通道：整页重载要几秒，期间桥接
+// 不可用。而它平时是藏着的，用户根本看不见它是哪门语言。所以语言没变就不重载，
+// 窗口藏着就先把这笔账欠着，等它真露出面再补——主窗口这边只换文案，全程无感。
+type langNavigator struct {
+	mu       sync.Mutex
+	page     string // 会话页当前实际加载的语言
+	want     string // 用户选定的语言
+	quietTil time.Time
+}
+
+func newLangNavigator(lang string) *langNavigator {
+	return &langNavigator{page: lang, want: lang}
+}
+
+// request 记录用户选的语言，返回需要立刻导航的地址；空串表示这次不用重载。
+func (n *langNavigator) request(code string, visible func() bool) string {
+	n.mu.Lock()
+	n.want = code
+	n.mu.Unlock()
+	return n.owed(visible)
+}
+
+// owed 结清欠着的重载：语言已经一致、或窗口还藏着，都返回空串。visible 只在
+// 确实欠账时才调用——启动时 OnChange 会先回调一次，那会儿窗口还没建好，问它
+// 可见性会把主线程卡住。
+func (n *langNavigator) owed(visible func() bool) string {
+	if !n.waiting() {
+		return ""
+	}
+	if visible != nil && !visible() {
+		return ""
+	}
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if n.want == n.page {
+		return ""
+	}
+	url := tasksURLFor(n.want)
+	n.page = n.want
+	n.quietTil = time.Now().Add(sessionQuietWindow)
+	return url
+}
+
+// waiting 报告是否还欠着一次重载，兜底轮询用它跳过无谓的窗口可见性查询。
+func (n *langNavigator) waiting() bool {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return n.want != n.page
+}
+
+// settled 在页面 announce 就绪后调用：重载已经落地，把安静期收短。
+func (n *langNavigator) settled() {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if time.Now().Before(n.quietTil) {
+		n.quietTil = time.Now().Add(sessionReadyGrace)
+	}
+}
+
+// isQuiet 报告 watcher 现在是否该保持安静：重载引起的 ready 抖动不要去
+// Show/Hide 会话窗，否则在主窗口里点一下语言，会话窗会突然弹到脸上。
+func (n *langNavigator) isQuiet() bool {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return time.Now().Before(n.quietTil)
 }
 
 // googleHL 把词表语言码映射成 Google 的界面语言参数值；没收录的语言直接把

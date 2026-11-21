@@ -135,6 +135,31 @@ func (b *Bridge) Ready() bool {
 	return b.ready
 }
 
+// MarkNavigating 在会话页开始导航时调用（切语言的 location.replace、主题兜底
+// Reload、页面自己跳转都算）：把 ready 打回去，并当场掐掉所有在飞的调用。
+//
+// 不这么做的话，调用会投进一个正在被拆掉的文档里：老文档的 fetch 被中断，回一句
+// "TypeError: Load failed"；新文档还没装好引导脚本，压根不回，Go 侧只能干等到
+// 30 秒超时。主界面读数据撞上这段时间就会挂住或报错。
+func (b *Bridge) MarkNavigating() {
+	b.stateMu.Lock()
+	b.ready = false
+	b.stateMu.Unlock()
+
+	b.mu.Lock()
+	inflight := b.pending
+	b.pending = make(map[uint64]chan *envelope, len(inflight))
+	b.mu.Unlock()
+
+	// Call 把 nil 回执当作 ErrNoReply，属于「自己会好」的临时故障。
+	for _, waiter := range inflight {
+		select {
+		case waiter <- nil:
+		default:
+		}
+	}
+}
+
 // Info returns the most recent probe payload reported by the page.
 func (b *Bridge) Info() json.RawMessage {
 	b.stateMu.RLock()

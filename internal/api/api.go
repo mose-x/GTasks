@@ -29,6 +29,13 @@ import (
 // probeTimeout bounds the live session probe triggered by the UI.
 const probeTimeout = 8 * time.Second
 
+// tasksTimeout bounds the main window's read. One snapshot round trip normally
+// lands in well under a second, and a page that is mid-navigation now fails fast
+// (see bridge.MarkNavigating), so waiting the bridge's full 30s here would only
+// happen when the page is wedged — the UI is better off serving the previous
+// snapshot than hanging on a spinner.
+const tasksTimeout = 10 * time.Second
+
 // Entry is one captured batchexecute request/response pair.
 type Entry struct {
 	Seq uint64          `json:"seq"`
@@ -225,16 +232,28 @@ type Handler struct {
 	i18n     *i18n.Manager
 	dataDir  string
 
+	// 最近一次成功快照的响应体：会话页重载（比如切语言）期间桥接暂不可用，
+	// 主窗口继续拿这份旧数据渲染，界面不闪空、不弹横幅。
+	tasksMu    sync.Mutex
+	tasksCache map[string]any
+
 	mu         sync.RWMutex
 	mainWin    *application.WebviewWindow
 	sessionWin *application.WebviewWindow
 	themeMenu  ThemeMenuOpener
 	langMenu   LangMenuOpener
 	winLookup  WindowLookup
+	shownHook  SessionShownReporter
 }
 
 // WindowLookup 按名字取窗口（工作台是懒创建的，API 侧拿不到直接引用）。
 type WindowLookup func(name string) *application.WebviewWindow
+
+// SessionShownReporter 把会话窗口的显示 / 隐藏报给 main：切语言的重载要挑窗口
+// 收起来的时候欠着、露面了再补。wails 的 IsVisible 读的是遮挡状态（被别的窗口
+// 完全盖住就算不可见），拿它当「我们有没有把窗口收起来」的判据不靠谱，所以由
+// 调用方自己记账。
+type SessionShownReporter func(shown bool)
 
 // ThemeMenuOpener 在调用方指定的 webview 坐标处弹出主题单选菜单。由 main 注入，
 // 这样前端按钮点下去弹的是原生菜单，和会话页顶栏那颗按钮行为一致。
@@ -316,6 +335,23 @@ func (h *Handler) SetLangMenuOpener(opener LangMenuOpener) {
 	h.mu.Lock()
 	h.langMenu = opener
 	h.mu.Unlock()
+}
+
+// SetSessionShownHook 注入会话窗口显隐的上报回调。
+func (h *Handler) SetSessionShownHook(report SessionShownReporter) {
+	h.mu.Lock()
+	h.shownHook = report
+	h.mu.Unlock()
+}
+
+// reportSessionShown 在 Show / Hide 之后调用，把窗口状态同步出去。
+func (h *Handler) reportSessionShown(shown bool) {
+	h.mu.RLock()
+	report := h.shownHook
+	h.mu.RUnlock()
+	if report != nil {
+		report(shown)
+	}
 }
 
 // ServeHTTP implements http.Handler for the /api subtree.
@@ -447,19 +483,23 @@ func (h *Handler) handleSession(w http.ResponseWriter, r *http.Request) {
 	switch request.Action {
 	case "show":
 		sessionWin.Show()
+		h.reportSessionShown(true)
 	case "hide":
 		sessionWin.Hide()
+		h.reportSessionShown(false)
 	case "focus":
 		// 被其它窗口完全遮住时，WebKit 会把页面标成 hidden，Google 的前端会
 		// 停止渲染并忽略交互；逆向时需要能把会话窗口真正拉到前台。
 		sessionWin.Show()
 		sessionWin.Center()
 		sessionWin.Focus()
+		h.reportSessionShown(true)
 	case "float":
 		sessionWin.Show()
 		sessionWin.Center()
 		sessionWin.SetAlwaysOnTop(true)
 		sessionWin.Focus()
+		h.reportSessionShown(true)
 	case "sink":
 		sessionWin.SetAlwaysOnTop(false)
 	case "windows":
@@ -663,18 +703,58 @@ func (h *Handler) handleTasks(w http.ResponseWriter, _ *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "任务服务未启用")
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), bridge.DefaultTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), tasksTimeout)
 	defer cancel()
 
 	snapshot, err := h.service.Snapshot(ctx)
 	if err != nil {
+		// 会话页正在导航 / 引导脚本还没装好（切语言、主题兜底重载、掉线恢复
+		// 都会短暂走到这里）：这类故障自己会好，把上一次成功的快照垫回去，主
+		// 窗口就不会闪空列表、甩红横幅。真掉线不垫，照常报错引导重新登录。
+		if transientSessionError(err) && !h.sessionExpired() && h.writeStaleTasks(w) {
+			return
+		}
 		writeError(w, http.StatusBadGateway, describe(err))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	payload := map[string]any{
 		"snapshot": snapshot,
 		"email":    h.accountEmail(),
-	})
+	}
+	h.tasksMu.Lock()
+	h.tasksCache = payload
+	h.tasksMu.Unlock()
+	writeJSON(w, http.StatusOK, payload)
+}
+
+// transientSessionError 报告错误是不是「会话页暂时够不着」这一类会自己好的故障。
+func transientSessionError(err error) bool {
+	return errors.Is(err, bridge.ErrNotReady) ||
+		errors.Is(err, bridge.ErrNoReply) ||
+		errors.Is(err, bridge.ErrNotBound)
+}
+
+// sessionExpired 是 watcher 对掉线的判定：cookie 或 at 被 Google 拒了。
+func (h *Handler) sessionExpired() bool {
+	return h.watcher != nil && h.watcher.Status().Expired
+}
+
+// writeStaleTasks 把最近一次成功的快照垫回去，附带 stale 标记让前端知道这份
+// 数据是存货、桥接恢复后要静默补一次。没有存货时返回 false，走正常报错。
+func (h *Handler) writeStaleTasks(w http.ResponseWriter) bool {
+	h.tasksMu.Lock()
+	cached := h.tasksCache
+	h.tasksMu.Unlock()
+	if cached == nil {
+		return false
+	}
+	payload := make(map[string]any, len(cached)+1)
+	for key, value := range cached {
+		payload[key] = value
+	}
+	payload["stale"] = true
+	writeJSON(w, http.StatusOK, payload)
+	return true
 }
 
 // accountEmail reads the signed-in address out of the page's own globals for the

@@ -164,6 +164,12 @@ const SESSION_WARMING_UP = /引导脚本|页面未响应|尚未登录|正在加�
 const WARMUP_RETRIES = 20;
 let warmupAttempts = 0;
 
+// 会话页短暂够不着时（切语言重载、主题兜底重载、掉线恢复），Go 会把上一次
+// 成功的快照垫回来并打上 stale：界面照旧渲染，不闪空列表也不甩横幅，等桥接
+// 回来再静默补一次。重试有上限，真出问题时不会无限打转。
+const STALE_RETRIES = 12;
+let staleAttempts = 0;
+
 async function loadData() {
   if (store.demo) {
     seedDemo();
@@ -185,6 +191,12 @@ async function loadData() {
     if (store.expired) expiredBanner();
     else hideBanner();
     renderAll();
+    if (payload.stale && staleAttempts < STALE_RETRIES) {
+      staleAttempts += 1;
+      setTimeout(loadData, 1000);
+      return;
+    }
+    staleAttempts = 0;
   } catch (error) {
     store.lists = [];
     store.tasks = [];
@@ -897,12 +909,30 @@ function selectList(id) {
   renderAll();
 }
 
+// 侧栏、任务列表、详情面板每次都是整块重建 DOM 的：切语言或刷新数据都会把
+// 滚动位置打回顶部、把焦点从正在编辑的控件上摘掉，观感上像界面被重置了一遍。
+// 渲染前记下滚动位置和焦点元素，渲染后原样放回去。
+const SCROLL_REGIONS = ["listNav", "taskList", "detailBody"];
+
 function renderAll() {
+  const scrolled = SCROLL_REGIONS.map((id) => $(id))
+    .filter(Boolean)
+    .map((node) => ({ node, top: node.scrollTop }));
+  const active = document.activeElement;
+  const activeId = active && active.id ? active.id : "";
   renderSidebar();
   renderAccount();
   renderTasks();
   if (store.activeTaskId) renderDetail();
   else $("detailPanel").hidden = true;
+  for (const { node, top } of scrolled) {
+    if (top) node.scrollTop = top;
+  }
+  // 只有焦点元素真被重建掉了才补焦点，避免抢走用户手上的输入。
+  if (activeId && active && !document.contains(active)) {
+    const restored = $(activeId);
+    if (restored && typeof restored.focus === "function") restored.focus();
+  }
 }
 
 /* ----------------------------------------------------------------- bind */
