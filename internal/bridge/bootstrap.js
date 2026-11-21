@@ -1431,7 +1431,9 @@
     }
   }
 
-  function installSplash() {
+  // skipReadyWatch 给「导航中遮罩」用：旧页的首屏信号已经没有意义（文档马上
+  // 要被拆掉），不能让 watchSplash 看见现成首屏就把遮罩收掉，只留硬超时兜底。
+  function installSplash(skipReadyWatch) {
     if (document.getElementById(SPLASH_ID)) return;
     var palette = splashDark()
       ? { bg: "#1b1b1b", fg: "#9aa0a6", accent: "#8ab4f8" }
@@ -1477,6 +1479,10 @@
       "</span></div>";
     (document.head || document.documentElement).appendChild(style);
     (document.body || document.documentElement).appendChild(splash);
+    if (skipReadyWatch) {
+      setTimeout(hideSplash, SPLASH_TIMEOUT);
+      return;
+    }
     watchSplash();
   }
 
@@ -1545,6 +1551,13 @@
     } catch (ignored) {}
     renderThemeButton();
     verifyColorScheme(dark);
+  };
+
+  // Go 侧切语言 / 兜底重载的导航到达之前，先给当前页盖上遮罩：点击到新文档
+  // document-start 之间有 1~3 秒网络空档，没有遮罩旧页看起来像卡死。新页的
+  // 遮罩由 document-start 的 installSplash 接管，两段同色同文案，视觉连续。
+  api.showSplash = function () {
+    installSplash(true);
   };
 
   installInitDataRecorder();
