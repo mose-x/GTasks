@@ -36,8 +36,10 @@ mkdir -p build/bin
 ASSET_NAME="gtasks-${VERSION}-linux-${ASSET_ARCH}"
 TAR_NAME="${ASSET_NAME}.tar.gz"
 
+# -tags production：Wails 发布标签，剔掉 dev server 代理 / devtools 等开发期代码路径。
+# purego 通道保持不变：runner 上没有 gtk / webkit 的 dev 包。
 GOOS=linux GOARCH="$ARCH" CGO_ENABLED=0 \
-  go build -tags purego -trimpath -ldflags "-X main.version=${VERSION}" \
+  go build -tags "purego production" -trimpath -ldflags "-X main.version=${VERSION}" \
   -o "build/bin/${ASSET_NAME}" .
 
 # --- .desktop 与安装树。图标直接用 build/app-icon.png（512x512），
