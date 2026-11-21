@@ -6,7 +6,7 @@ permissions:
 on:
   push:
     tags:
-      - 'v*'
+      - "v*"
   workflow_dispatch:
 
 # 同一个 ref 的构建串行（例如删掉标签重推），避免两条发布流水线交叉写同一份产物。
@@ -15,9 +15,9 @@ concurrency:
   group: build-${{ github.ref }}
 
 env:
-  GO_VERSION: '1.26'
+  GO_VERSION: "1.26"
   # 脚本里的默认值是国内镜像，CI 用官方 proxy 更快也更稳。
-  GOPROXY: 'https://proxy.golang.org,direct'
+  GOPROXY: "https://proxy.golang.org,direct"
 
 jobs:
   # ====== Windows ======

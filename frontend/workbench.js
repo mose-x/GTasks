@@ -73,7 +73,11 @@ async function refreshState() {
   try {
     const state = await api("/api/state");
     $("readyDot").classList.toggle("on", !!state.ready);
-    setBadge("badgeBridge", t("wb.bridge", "桥接: {state}", { state: state.ready ? t("wb.ready", "就绪") : t("wb.notReady", "未就绪") }), state.ready ? "ok" : "warn");
+    setBadge(
+      "badgeBridge",
+      t("wb.bridge", "桥接: {state}", { state: state.ready ? t("wb.ready", "就绪") : t("wb.notReady", "未就绪") }),
+      state.ready ? "ok" : "warn",
+    );
 
     const session = state.session;
     const health = (state.watcher && state.watcher.health) || "";
@@ -82,7 +86,9 @@ async function refreshState() {
       const note = expired ? t("wb.expired", "会话失效") : health && health !== "ok" ? health : "";
       setBadge(
         "badgeLogin",
-        t("wb.login", "登录: {state}", { state: (session.loggedIn ? t("wb.yes", "是") : t("wb.no", "否")) + (note ? `（${note}）` : "") }),
+        t("wb.login", "登录: {state}", {
+          state: (session.loggedIn ? t("wb.yes", "是") : t("wb.no", "否")) + (note ? `（${note}）` : ""),
+        }),
         session.loggedIn ? (expired ? "warn" : "ok") : "bad",
       );
       setBadge("badgeToken", `at: ${session.at ? session.at.slice(0, 12) + "…" : "—"}`, session.at ? "ok" : "bad");
@@ -92,10 +98,23 @@ async function refreshState() {
       setBadge("badgeToken", "at: —", "");
       setBadge("badgeBuild", "bl: —", "");
     }
-    setBadge("badgeCount", t("wb.sniffBadge", "抓包: {count}{drop}", { count: state.sniffed, drop: state.dropped ? t("wb.dropped", " (丢弃 {count})", { count: state.dropped }) : "" }), state.sniffed ? "ok" : "");
-    setBadge("badgeOps", t("wb.opsBadge", "操作: {ready}/{total}", { ready: state.opsReady, total: state.opsTotal }), state.opsReady ? "ok" : "");
+    setBadge(
+      "badgeCount",
+      t("wb.sniffBadge", "抓包: {count}{drop}", {
+        count: state.sniffed,
+        drop: state.dropped ? t("wb.dropped", " (丢弃 {count})", { count: state.dropped }) : "",
+      }),
+      state.sniffed ? "ok" : "",
+    );
+    setBadge(
+      "badgeOps",
+      t("wb.opsBadge", "操作: {ready}/{total}", { ready: state.opsReady, total: state.opsTotal }),
+      state.opsReady ? "ok" : "",
+    );
 
-    $("btnShowSession").textContent = state.sessionWindowVisible ? t("wb.showSessionChecked", "显示会话窗口 ✓") : t("wb.showSession", "显示会话窗口");
+    $("btnShowSession").textContent = state.sessionWindowVisible
+      ? t("wb.showSessionChecked", "显示会话窗口 ✓")
+      : t("wb.showSession", "显示会话窗口");
     $("chkAutoManage").checked = !!state.autoManage;
     $("chkAutoSniff").checked = state.watcher ? true : $("chkAutoSniff").checked;
   } catch (error) {
@@ -107,7 +126,12 @@ async function probe() {
   try {
     const session = await api("/api/probe", { method: "POST" });
     fillDump("sessionDump", pretty(session));
-    toast(t("wb.sessionReady", "会话就绪 · {login} · {origin}", { login: session.loggedIn ? t("wb.loggedIn", "已登录") : t("wb.notLogged", "未登录"), origin: session.origin }));
+    toast(
+      t("wb.sessionReady", "会话就绪 · {login} · {origin}", {
+        login: session.loggedIn ? t("wb.loggedIn", "已登录") : t("wb.notLogged", "未登录"),
+        origin: session.origin,
+      }),
+    );
     await refreshState();
   } catch (error) {
     fillDump("sessionDump", t("wb.probeFailed", "探测失败: {message}", { message: error.message }));
@@ -143,7 +167,12 @@ async function setAutoFlags() {
         autoSniff: $("chkAutoSniff").checked,
       },
     });
-    toast(t("wb.autoToast", "自动隐藏会话: {a} · 自动抓包: {b}", { a: $("chkAutoManage").checked ? t("wb.on", "开") : t("wb.off", "关"), b: $("chkAutoSniff").checked ? t("wb.on", "开") : t("wb.off", "关") }));
+    toast(
+      t("wb.autoToast", "自动隐藏会话: {a} · 自动抓包: {b}", {
+        a: $("chkAutoManage").checked ? t("wb.on", "开") : t("wb.off", "关"),
+        b: $("chkAutoSniff").checked ? t("wb.on", "开") : t("wb.off", "关"),
+      }),
+    );
   } catch (error) {
     toast(error.message, true);
   }
@@ -177,7 +206,9 @@ async function pollSniff() {
     visible = entries.slice(-MAX_RENDERED);
     if (!historyNoted) {
       historyNoted = true;
-      toast(t("wb.sniffTruncated", "历史抓包较多，仅显示最近 {count} 条（完整内容用「导出」）", { count: MAX_RENDERED }));
+      toast(
+        t("wb.sniffTruncated", "历史抓包较多，仅显示最近 {count} 条（完整内容用「导出」）", { count: MAX_RENDERED }),
+      );
     }
   }
   for (const entry of visible) {
@@ -185,7 +216,14 @@ async function pollSniff() {
     sniffCursor = entry.seq;
   }
   trimSniffList();
-  setBadge("badgeCount", t("wb.sniffBadge", "抓包: {count}{drop}", { count: payload.seq, drop: payload.dropped ? t("wb.dropped", " (丢弃 {count})", { count: payload.dropped }) : "" }), "ok");
+  setBadge(
+    "badgeCount",
+    t("wb.sniffBadge", "抓包: {count}{drop}", {
+      count: payload.seq,
+      drop: payload.dropped ? t("wb.dropped", " (丢弃 {count})", { count: payload.dropped }) : "",
+    }),
+    "ok",
+  );
 }
 
 // Newest entries are prepended, so the oldest ones sit at the bottom.
@@ -229,8 +267,7 @@ function makeInternalGroup(entry, detail) {
   item._entries = [];
   const head = document.createElement("div");
   head.className = "sniff-head";
-  head.innerHTML =
-    `<span class="sniff-time"></span><span class="sniff-ids"></span><span class="sniff-status ok"></span>`;
+  head.innerHTML = `<span class="sniff-time"></span><span class="sniff-ids"></span><span class="sniff-status ok"></span>`;
   head.addEventListener("click", () => {
     item.classList.toggle("open");
     if (item.classList.contains("open") && !item._rendered) {
@@ -253,7 +290,11 @@ function extendInternalGroup(item, entry, detail) {
   const stamp = new Date(detail.t || entry.at || Date.now()).toLocaleTimeString("zh-CN", { hour12: false });
   const head = item.querySelector(".sniff-head");
   head.querySelector(".sniff-time").textContent = `#${first.entry.seq}…#${last.entry.seq} ${stamp}`;
-  head.querySelector(".sniff-ids").textContent = t("wb.internalGroup", "内部同步调用（临时显隐清单的副作用） ×{count}", { count: item._entries.length });
+  head.querySelector(".sniff-ids").textContent = t(
+    "wb.internalGroup",
+    "内部同步调用（临时显隐清单的副作用） ×{count}",
+    { count: item._entries.length },
+  );
   head.querySelector(".sniff-status").textContent = String(detail.status ?? "?");
 }
 
@@ -262,15 +303,15 @@ function makeEntryItem(entry, detail) {
   item.className = "sniff-item";
   item.dataset.seq = String(entry.seq);
 
-  const ids = Array.isArray(detail.rpcids) && detail.rpcids.length ? detail.rpcids.join(", ") : t("wb.unknownRpc", "(未识别)");
+  const ids =
+    Array.isArray(detail.rpcids) && detail.rpcids.length ? detail.rpcids.join(", ") : t("wb.unknownRpc", "(未识别)");
   const status = detail.status ?? "?";
   const okStatus = Number(status) >= 200 && Number(status) < 300;
   const stamp = new Date(detail.t || entry.at || Date.now()).toLocaleTimeString("zh-CN", { hour12: false });
 
   const head = document.createElement("div");
   head.className = "sniff-head";
-  head.innerHTML =
-    `<span class="sniff-time"></span><span class="sniff-ids"></span><span class="sniff-status ${okStatus ? "ok" : "bad"}"></span>`;
+  head.innerHTML = `<span class="sniff-time"></span><span class="sniff-ids"></span><span class="sniff-status ${okStatus ? "ok" : "bad"}"></span>`;
   head.querySelector(".sniff-time").textContent = `#${entry.seq} ${stamp}`;
   head.querySelector(".sniff-ids").textContent = ids;
   head.querySelector(".sniff-status").textContent = String(status);
@@ -283,7 +324,13 @@ function makeEntryItem(entry, detail) {
   meta.className = "hint";
   meta.textContent = `${detail.via || "?"} · ${detail.url || ""}`;
 
-  body.append(meta, section(t("wb.sectionReq", "f.req（请求参数）"), detail.freq !== undefined ? pretty(detail.freq) : detail.freqRaw || t("wb.none", "(无)")));
+  body.append(
+    meta,
+    section(
+      t("wb.sectionReq", "f.req（请求参数）"),
+      detail.freq !== undefined ? pretty(detail.freq) : detail.freqRaw || t("wb.none", "(无)"),
+    ),
+  );
   body.append(section(t("wb.sectionResp", "原始响应"), detail.response || t("wb.none", "(无)")));
 
   const tools = document.createElement("div");
@@ -407,7 +454,11 @@ async function loadOps() {
     syncOps = new Set(payload.sync || []);
     renderOps();
     renderOpSelects();
-    setBadge("badgeOps", t("wb.opsBadge", "操作: {ready}/{total}", { ready: payload.ready, total: payload.total }), payload.ready ? "ok" : "");
+    setBadge(
+      "badgeOps",
+      t("wb.opsBadge", "操作: {ready}/{total}", { ready: payload.ready, total: payload.total }),
+      payload.ready ? "ok" : "",
+    );
   } catch (error) {
     toast(error.message, true);
   }
@@ -439,8 +490,9 @@ function renderOps() {
     key.textContent = definition.op;
     const rpcids = document.createElement("span");
     rpcids.className = "op-rpcids";
-    rpcids.textContent = (definition.steps || []).map((step) => step.rpcid).join(", ")
-      || (syncOps.has(definition.op) ? t("wb.syncChannel", "SOV0tb（同步通道）") : "");
+    rpcids.textContent =
+      (definition.steps || []).map((step) => step.rpcid).join(", ") ||
+      (syncOps.has(definition.op) ? t("wb.syncChannel", "SOV0tb（同步通道）") : "");
     head.append(state, label, key, rpcids);
     head.addEventListener("click", () => item.classList.toggle("open"));
 
@@ -512,7 +564,12 @@ async function executeOperation() {
   try {
     const payload = await api("/api/ops/execute", { method: "POST", body: { op, params } });
     $("execOutput").value = pretty(payload);
-    toast(payload.error ? t("wb.execError", "已返回，但有错误: {message}", { message: payload.error }) : t("wb.execDone", "{op} 执行完成", { op }), !!payload.error);
+    toast(
+      payload.error
+        ? t("wb.execError", "已返回，但有错误: {message}", { message: payload.error })
+        : t("wb.execDone", "{op} 执行完成", { op }),
+      !!payload.error,
+    );
   } catch (error) {
     $("execOutput").value = t("wb.execFailed", "执行失败: {message}", { message: error.message });
     toast(error.message, true);
@@ -522,7 +579,10 @@ async function executeOperation() {
 /* ---------------------------------------------------------------- manual */
 
 function parseArgs(text, count) {
-  const lines = text.split("\n").map((line) => line.trim()).filter((line) => line.length > 0);
+  const lines = text
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
   const args = [];
   for (let index = 0; index < count; index++) {
     const line = lines[index];
@@ -532,7 +592,10 @@ function parseArgs(text, count) {
 }
 
 async function sendCall() {
-  const rpcids = $("inputRpcids").value.split(",").map((part) => part.trim()).filter(Boolean);
+  const rpcids = $("inputRpcids")
+    .value.split(",")
+    .map((part) => part.trim())
+    .filter(Boolean);
   if (rpcids.length === 0) {
     toast(t("wb.needRpcids", "请先填写 rpcids"), true);
     return;
@@ -554,7 +617,8 @@ async function sendCall() {
   try {
     const payload = await api("/api/call", { method: "POST", body: { rpcids, args, opts } });
     $("outputRaw").value = pretty(payload);
-    if (payload.decodeError) toast(t("wb.decodeFailed", "已返回，但解码失败: {message}", { message: payload.decodeError }), true);
+    if (payload.decodeError)
+      toast(t("wb.decodeFailed", "已返回，但解码失败: {message}", { message: payload.decodeError }), true);
     else toast(t("wb.callDone", "调用完成"));
   } catch (error) {
     $("outputRaw").value = t("wb.callFailed", "调用失败: {message}", { message: error.message });
@@ -635,8 +699,12 @@ function bindUI() {
   $("btnCall").addEventListener("click", sendCall);
   $("btnDecode").addEventListener("click", decodeRaw);
 
-  $("btnCopySession").addEventListener("click", () => copyText($("sessionDump").textContent, t("wb.sessionInfo", "会话信息")));
-  $("btnCopyConfig").addEventListener("click", () => copyText($("configDump").textContent, t("wb.pathConfig", "路径配置")));
+  $("btnCopySession").addEventListener("click", () =>
+    copyText($("sessionDump").textContent, t("wb.sessionInfo", "会话信息")),
+  );
+  $("btnCopyConfig").addEventListener("click", () =>
+    copyText($("configDump").textContent, t("wb.pathConfig", "路径配置")),
+  );
 }
 
 async function init() {

@@ -44,13 +44,17 @@
     try {
       if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.external) {
         var webkitHandler = window.webkit.messageHandlers.external;
-        return function (text) { webkitHandler.postMessage(text); };
+        return function (text) {
+          webkitHandler.postMessage(text);
+        };
       }
     } catch (ignored) {}
     try {
       if (window.chrome && window.chrome.webview && typeof window.chrome.webview.postMessage === "function") {
         var edgeHandler = window.chrome.webview;
-        return function (text) { edgeHandler.postMessage(text); };
+        return function (text) {
+          edgeHandler.postMessage(text);
+        };
       }
     } catch (ignored) {}
     return null;
@@ -111,7 +115,9 @@
     try {
       cookieNames = (document.cookie || "")
         .split(";")
-        .map(function (pair) { return pair.trim().split("=")[0]; })
+        .map(function (pair) {
+          return pair.trim().split("=")[0];
+        })
         .filter(Boolean);
     } catch (ignored) {}
 
@@ -130,7 +136,7 @@
       wizScalars: scalars,
       visibleCookieNames: cookieNames,
       fetchPatched: !!window.__gtaskFetchPatched,
-      xhrPatched: !!window.__gtaskXHRPatched
+      xhrPatched: !!window.__gtaskXHRPatched,
     };
   }
 
@@ -179,7 +185,11 @@
       } catch (ignored) {}
     }
     var bl = /[?&]bl=([^&]*)/.exec(url);
-    if (bl) { try { entry.bl = decodeURIComponent(bl[1]); } catch (ignored) {} }
+    if (bl) {
+      try {
+        entry.bl = decodeURIComponent(bl[1]);
+      } catch (ignored) {}
+    }
     if (typeof body === "string" && body) {
       var freq = /(?:^|&)f\.req=([^&]*)/.exec(body);
       if (freq) {
@@ -190,7 +200,11 @@
         }
       }
       var at = /(?:^|&)at=([^&]*)/.exec(body);
-      if (at) { try { entry.at = decodeURIComponent(at[1]); } catch (ignored) {} }
+      if (at) {
+        try {
+          entry.at = decodeURIComponent(at[1]);
+        } catch (ignored) {}
+      }
     }
     return entry;
   }
@@ -227,7 +241,9 @@
 
   function markInternalRpc(ms) {
     window.__gtasksInternalRpc = true;
-    setTimeout(function () { window.__gtasksInternalRpc = false; }, ms || 1500);
+    setTimeout(function () {
+      window.__gtasksInternalRpc = false;
+    }, ms || 1500);
   }
 
   // 页面经常传 Request 对象而不是 (url, init)，此时 init 里没有 body，只能
@@ -236,7 +252,11 @@
     var direct = bodyText(init);
     if (direct !== null) return Promise.resolve(direct);
     try {
-      if (input && typeof input.clone === "function" && (!input.method || String(input.method).toUpperCase() !== "GET")) {
+      if (
+        input &&
+        typeof input.clone === "function" &&
+        (!input.method || String(input.method).toUpperCase() !== "GET")
+      ) {
         return input.clone().text();
       }
     } catch (ignored) {}
@@ -264,22 +284,28 @@
       var pendingBody = active && entry ? requestBodyPromise(input, init) : null;
       var promise = original.apply(this, arguments);
       if (entry) {
-        promise.then(function (response) {
-          var texts = [Promise.resolve(null), Promise.resolve(null)];
-          try {
-            texts[0] = response.clone().text();
-          } catch (ignored) {}
-          if (pendingBody) texts[1] = pendingBody;
-          Promise.all(texts).then(function (settled) {
-            entry.status = response.status;
-            if (typeof settled[0] === "string") entry.response = truncate(settled[0]);
-            mergeRequestBody(entry, url, settled[1]);
-            record(entry);
-          }, function () {
-            entry.status = response.status;
-            record(entry);
-          });
-        }, function () {});
+        promise.then(
+          function (response) {
+            var texts = [Promise.resolve(null), Promise.resolve(null)];
+            try {
+              texts[0] = response.clone().text();
+            } catch (ignored) {}
+            if (pendingBody) texts[1] = pendingBody;
+            Promise.all(texts).then(
+              function (settled) {
+                entry.status = response.status;
+                if (typeof settled[0] === "string") entry.response = truncate(settled[0]);
+                mergeRequestBody(entry, url, settled[1]);
+                record(entry);
+              },
+              function () {
+                entry.status = response.status;
+                record(entry);
+              },
+            );
+          },
+          function () {},
+        );
       }
       return promise;
     };
@@ -385,7 +411,7 @@
               value.apply(window, pending[index]);
             } catch (ignored) {}
           }
-        }
+        },
       });
     } catch (ignored) {
       window.AF_initDataCallback = wrapped;
@@ -404,7 +430,7 @@
       },
       get: function (key) {
         return Object.prototype.hasOwnProperty.call(store, key) ? store[key] : null;
-      }
+      },
     };
     window.__gtaskInitPatched = true;
   }
@@ -442,7 +468,7 @@
   function batchQuery(rpcids, opts, bl) {
     var query = [
       "rpcids=" + encodeURIComponent(rpcids.join(",")),
-      "source-path=" + encodeURIComponent(opts.sourcePath || location.pathname || "/")
+      "source-path=" + encodeURIComponent(opts.sourcePath || location.pathname || "/"),
     ];
     if (bl) query.push("bl=" + encodeURIComponent(bl));
     query.push("_reqid=" + requestCounter++);
@@ -489,26 +515,34 @@
       method: "POST",
       credentials: "include",
       headers: headers,
-      body: body
-    }).then(function (response) {
-      return response.text().then(function (text) {
-        // HTTP 4xx/5xx 也是有效结果：状态码和 auth 判定要交给 Go 去决策，
-        // 这里一旦按失败回复，载荷就被丢掉，只能看到一句 "HTTP 404"。
-        reply(id, true, {
-          status: response.status,
-          auth: authState(response),
-          url: url,
-          path: path,
-          at: at,
-          bl: bl,
-          rpcids: rpcids,
-          elapsedMs: Date.now() - startedAt,
-          raw: truncate(text)
-        }, "");
-      });
-    }, function (error) {
-      reply(id, false, null, String(error));
-    });
+      body: body,
+    }).then(
+      function (response) {
+        return response.text().then(function (text) {
+          // HTTP 4xx/5xx 也是有效结果：状态码和 auth 判定要交给 Go 去决策，
+          // 这里一旦按失败回复，载荷就被丢掉，只能看到一句 "HTTP 404"。
+          reply(
+            id,
+            true,
+            {
+              status: response.status,
+              auth: authState(response),
+              url: url,
+              path: path,
+              at: at,
+              bl: bl,
+              rpcids: rpcids,
+              elapsedMs: Date.now() - startedAt,
+              raw: truncate(text),
+            },
+            "",
+          );
+        });
+      },
+      function (error) {
+        reply(id, false, null, String(error));
+      },
+    );
   }
 
   // --------------------------------------------------------------- dispatch
@@ -564,14 +598,19 @@
         return;
       }
       var truncated = text.length > INIT_DATA_LIMIT;
-      reply(id, true, {
-        key: entry.key,
-        hash: entry.hash,
-        found: true,
-        truncated: truncated,
-        size: text.length,
-        data: truncated ? text.slice(0, INIT_DATA_LIMIT) : text
-      }, "");
+      reply(
+        id,
+        true,
+        {
+          key: entry.key,
+          hash: entry.hash,
+          found: true,
+          truncated: truncated,
+          size: text.length,
+          data: truncated ? text.slice(0, INIT_DATA_LIMIT) : text,
+        },
+        "",
+      );
     },
     // 逆向用的通用逃生口：在页面上下文里执行一段脚本并取回 JSON 结果。只由
     // 本机回环端口（带自定义头，跨站请求会被预检拦掉）触发。
@@ -597,15 +636,20 @@
         }
         if (text === undefined) text = "null";
         var oversized = text.length > INIT_DATA_LIMIT;
-        reply(id, true, {
-          truncated: oversized,
-          size: text.length,
-          result: oversized ? text.slice(0, INIT_DATA_LIMIT) : text
-        }, "");
+        reply(
+          id,
+          true,
+          {
+            truncated: oversized,
+            size: text.length,
+            result: oversized ? text.slice(0, INIT_DATA_LIMIT) : text,
+          },
+          "",
+        );
       };
       var value;
       try {
-        value = new Function('"use strict";return (' + source + ');')();
+        value = new Function('"use strict";return (' + source + ");")();
       } catch (error) {
         try {
           value = new Function('"use strict";' + source)();
@@ -633,13 +677,21 @@
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8", "X-Same-Domain": "1" },
-        body: "f.req=" + encodeURIComponent(JSON.stringify([[[HEALTH_RPC, HEALTH_ARGS, null, "1"]]])) + "&at=" + encodeURIComponent(at) + "&",
-        __gtaskNoSniff: true
-      }).then(function (response) {
-        reply(id, true, { state: authState(response), status: response.status, at: at }, "");
-      }, function (error) {
-        reply(id, false, null, String(error));
-      });
+        body:
+          "f.req=" +
+          encodeURIComponent(JSON.stringify([[[HEALTH_RPC, HEALTH_ARGS, null, "1"]]])) +
+          "&at=" +
+          encodeURIComponent(at) +
+          "&",
+        __gtaskNoSniff: true,
+      }).then(
+        function (response) {
+          reply(id, true, { state: authState(response), status: response.status, at: at }, "");
+        },
+        function (error) {
+          reply(id, false, null, String(error));
+        },
+      );
     },
     dispatch: function (raw) {
       var message;
@@ -660,7 +712,7 @@
       } catch (error) {
         reply(message.id, false, null, String(error));
       }
-    }
+    },
   };
 
   window.__gtask = api;
@@ -722,7 +774,7 @@
 
   function themeTitle(mode) {
     return tt("main.themeTitle", "主题：{mode}", {
-      mode: tt(UI_THEME_LABEL_KEY[mode] || "theme.system", UI_THEME_LABEL[mode] || mode)
+      mode: tt(UI_THEME_LABEL_KEY[mode] || "theme.system", UI_THEME_LABEL[mode] || mode),
     });
   }
 
@@ -737,12 +789,16 @@
   // 首屏（以及下面的启动遮罩）不必等 Go 回话就能拿到正确配色。
   var UI_THEME_KEY = "gtasks-theme";
   var UI_THEME_ICON = {
-    light: '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M12 7c-2.76 0-5 2.24-5 5s2.24 5 5 5 5-2.24 5-5-2.24-5-5-5zM2 13h2c.55 0 1-.45 1-1s-.45-1-1-1H2c-.55 0-1 .45-1 1s.45 1 1 1zm18 0h2c.55 0 1-.45 1-1s-.45-1-1-1h-2c-.55 0-1 .45-1 1s.45 1 1 1zM11 2v2c0 .55.45 1 1 1s1-.45 1-1V2c0-.55-.45-1-1-1s-1 .45-1 1zm0 18v2c0 .55.45 1 1 1s1-.45 1-1v-2c0-.55-.45-1-1-1s-1 .45-1 1zM5.99 4.58c-.39-.39-1.03-.39-1.41 0-.39.39-.39 1.03 0 1.41l1.06 1.06c.39.39 1.03.39 1.41 0s.39-1.03 0-1.41L5.99 4.58zm12.37 12.37c-.39-.39-1.03-.39-1.41 0-.39.39-.39 1.03 0 1.41l1.06 1.06c.39.39 1.03.39 1.41 0 .39-.39.39-1.03 0-1.41l-1.06-1.06zm1.06-10.96c.39-.39.39-1.03 0-1.41-.39-.39-1.03-.39-1.41 0l-1.06 1.06c-.39.39-.39 1.03 0 1.41s1.03.39 1.41 0l1.06-1.06zM7.05 18.36c.39.39.39 1.03 0 1.41-.39.39-1.03.39-1.41 0l-1.06-1.06c-.39-.39-.39-1.03 0-1.41.39-.39 1.03-.39 1.41 0l1.06 1.06z"/></svg>',
+    light:
+      '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M12 7c-2.76 0-5 2.24-5 5s2.24 5 5 5 5-2.24 5-5-2.24-5-5-5zM2 13h2c.55 0 1-.45 1-1s-.45-1-1-1H2c-.55 0-1 .45-1 1s.45 1 1 1zm18 0h2c.55 0 1-.45 1-1s-.45-1-1-1h-2c-.55 0-1 .45-1 1s.45 1 1 1zM11 2v2c0 .55.45 1 1 1s1-.45 1-1V2c0-.55-.45-1-1-1s-1 .45-1 1zm0 18v2c0 .55.45 1 1 1s1-.45 1-1v-2c0-.55-.45-1-1-1s-1 .45-1 1zM5.99 4.58c-.39-.39-1.03-.39-1.41 0-.39.39-.39 1.03 0 1.41l1.06 1.06c.39.39 1.03.39 1.41 0s.39-1.03 0-1.41L5.99 4.58zm12.37 12.37c-.39-.39-1.03-.39-1.41 0-.39.39-.39 1.03 0 1.41l1.06 1.06c.39.39 1.03.39 1.41 0 .39-.39.39-1.03 0-1.41l-1.06-1.06zm1.06-10.96c.39-.39.39-1.03 0-1.41-.39-.39-1.03-.39-1.41 0l-1.06 1.06c-.39.39-.39 1.03 0 1.41s1.03.39 1.41 0l1.06-1.06zM7.05 18.36c.39.39.39 1.03 0 1.41-.39.39-1.03.39-1.41 0l-1.06-1.06c-.39-.39-.39-1.03 0-1.41.39-.39 1.03-.39 1.41 0l1.06 1.06z"/></svg>',
     dark: '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M12 3c-4.97 0-9 4.03-9 9s4.03 9 9 9 9-4.03 9-9c0-.46-.04-.92-.1-1.36-.98 1.37-2.58 2.26-4.4 2.26-2.98 0-5.4-2.42-5.4-5.4 0-1.81.89-3.42 2.26-4.4-.44-.06-.9-.1-1.36-.1z"/></svg>',
-    system: '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M10.85 12.65h2.3L12 9l-1.15 3.65zM20 8.69V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12 20 8.69zM14.3 16l-.7-2h-3.2l-.7 2H7.8L11 7h2l3.2 9h-1.9z"/></svg>'
+    system:
+      '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M10.85 12.65h2.3L12 9l-1.15 3.65zM20 8.69V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12 20 8.69zM14.3 16l-.7-2h-3.2l-.7 2H7.8L11 7h2l3.2 9h-1.9z"/></svg>',
   };
-  var UI_MORE_ICON = '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/></svg>';
-  var UI_LANG_ICON = '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zm6.93 6h-2.95a15.65 15.65 0 0 0-1.38-3.56A8.03 8.03 0 0 1 18.92 8zM12 4.04c.83 1.2 1.48 2.53 1.91 3.96h-3.82c.43-1.43 1.08-2.76 1.91-3.96zM4.26 14C4.1 13.36 4 12.69 4 12s.1-1.36.26-2h3.38c-.08.66-.14 1.32-.14 2 0 .68.06 1.34.14 2H4.26zm.82 2h2.95c.32 1.25.78 2.45 1.38 3.56A7.987 7.987 0 0 1 5.08 16zm2.95-8H5.08a7.987 7.987 0 0 1 4.33-3.56A15.65 15.65 0 0 0 8.03 8zM12 19.96c-.83-1.2-1.48-2.53-1.91-3.96h3.82c-.43 1.43-1.08 2.76-1.91 3.96zM14.34 14H9.66c-.09-.66-.16-1.32-.16-2 0-.68.07-1.35.16-2h4.68c.09.65.16 1.32.16 2 0 .68-.07 1.34-.16 2zm.25 5.56c.6-1.11 1.06-2.31 1.38-3.56h2.95a8.03 8.03 0 0 1-4.33 3.56zM16.36 14c.08-.66.14-1.32.14-2 0-.68-.06-1.34-.14-2h3.38c.16.64.26 1.31.26 2s-.1 1.36-.26 2h-3.38z"/></svg>';
+  var UI_MORE_ICON =
+    '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/></svg>';
+  var UI_LANG_ICON =
+    '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zm6.93 6h-2.95a15.65 15.65 0 0 0-1.38-3.56A8.03 8.03 0 0 1 18.92 8zM12 4.04c.83 1.2 1.48 2.53 1.91 3.96h-3.82c.43-1.43 1.08-2.76 1.91-3.96zM4.26 14C4.1 13.36 4 12.69 4 12s.1-1.36.26-2h3.38c-.08.66-.14 1.32-.14 2 0 .68.06 1.34.14 2H4.26zm.82 2h2.95c.32 1.25.78 2.45 1.38 3.56A7.987 7.987 0 0 1 5.08 16zm2.95-8H5.08a7.987 7.987 0 0 1 4.33-3.56A15.65 15.65 0 0 0 8.03 8zM12 19.96c-.83-1.2-1.48-2.53-1.91-3.96h3.82c-.43 1.43-1.08 2.76-1.91 3.96zM14.34 14H9.66c-.09-.66-.16-1.32-.16-2 0-.68.07-1.35.16-2h4.68c.09.65.16 1.32.16 2 0 .68-.07 1.34-.16 2zm.25 5.56c.6-1.11 1.06-2.31 1.38-3.56h2.95a8.03 8.03 0 0 1-4.33 3.56zM16.36 14c.08-.66.14-1.32.14-2 0-.68-.06-1.34-.14-2h3.38c.16.64.26 1.31.26 2s-.1 1.36-.26 2h-3.38z"/></svg>';
   var SUPPORT_MENU_SELECTOR = 'ul[role="menu"][aria-label*="支持"], ul[role="menu"][aria-label*="Support"]';
   var SUPPORT_BUTTON_SELECTOR = 'button[aria-label*="支持"], button[aria-label*="Support"]';
   var LIST_ROW_SELECTOR = "li[data-task-list-id]";
@@ -753,10 +809,12 @@
   var ROW_MENU_EVENTS = ["pointerdown", "mousedown", "pointerup", "mouseup", "click", "dblclick", "auxclick"];
 
   function uiAvailable() {
-    return typeof document !== "undefined" &&
+    return (
+      typeof document !== "undefined" &&
       typeof document.createElement === "function" &&
       typeof document.querySelector === "function" &&
-      typeof MutationObserver === "function";
+      typeof MutationObserver === "function"
+    );
   }
 
   function uiCommand(name, args) {
@@ -787,13 +845,12 @@
       "li[data-task-list-id]:hover .gtasks-rowmenu, .gtasks-rowmenu:focus { display: inline-flex; }",
       ".gtasks-rowmenu:hover { background: rgba(128,134,139,.18); }",
       // 悬停时把计数让位给「列表选项」，避免两个元素叠在一起。
-      'li[data-task-list-id]:hover > span[jsname="orbTae"] { visibility: hidden; }'
-      ,
+      'li[data-task-list-id]:hover > span[jsname="orbTae"] { visibility: hidden; }',
       // 临时显示未勾选清单时，侧栏行要看起来和没勾一样：遮掉勾选 glyph 和
       // 填充底色，空框保留（属性由 openListOptions 挂/摘）。
-      'li[data-gtasks-tempshow] .KGC9Kd-HUofsb { visibility: hidden !important; }',
-      'li[data-gtasks-tempshow] .KGC9Kd-MPu53c { background-color: transparent !important; box-shadow: none !important; }',
-      'li[data-gtasks-tempshow] .KGC9Kd-YQoJzd { background-color: transparent !important; }'
+      "li[data-gtasks-tempshow] .KGC9Kd-HUofsb { visibility: hidden !important; }",
+      "li[data-gtasks-tempshow] .KGC9Kd-MPu53c { background-color: transparent !important; box-shadow: none !important; }",
+      "li[data-gtasks-tempshow] .KGC9Kd-YQoJzd { background-color: transparent !important; }",
     ].join("\n");
     (document.head || document.documentElement).appendChild(style);
   }
@@ -826,7 +883,11 @@
     var node = support.parentElement;
     while (node && node !== document.body && node !== document.documentElement) {
       var position = "";
-      try { position = window.getComputedStyle(node).position; } catch (ignored) { break; }
+      try {
+        position = window.getComputedStyle(node).position;
+      } catch (ignored) {
+        break;
+      }
       if (position === "relative" || position === "absolute" || position === "fixed") return node;
       node = node.parentElement;
     }
@@ -875,7 +936,9 @@
     var hostRect = host.getBoundingClientRect();
     if (supportRect.width < 8 || hostRect.width < 8) {
       if (headerPlaceTries++ < 20) {
-        setTimeout(function () { placeHeaderButtons(host, support, themeButton, langButton); }, 150);
+        setTimeout(function () {
+          placeHeaderButtons(host, support, themeButton, langButton);
+        }, 150);
       }
       return;
     }
@@ -887,7 +950,6 @@
     placeHeaderButton(themeButton, top, themeRight);
     placeHeaderButton(langButton, top, themeRight - 44);
   }
-
 
   function installHeaderButtons() {
     var support = document.querySelector(SUPPORT_BUTTON_SELECTOR);
@@ -1128,13 +1190,15 @@
   function watchMenuClose(menu, onClosed) {
     var timer = setInterval(function () {
       var rect = menu.getBoundingClientRect();
-      var gone = !menu.isConnected || rect.width === 0 || rect.height === 0 ||
-        getComputedStyle(menu).visibility === "hidden";
+      var gone =
+        !menu.isConnected || rect.width === 0 || rect.height === 0 || getComputedStyle(menu).visibility === "hidden";
       if (!gone) return;
       clearInterval(timer);
       onClosed();
     }, 150);
-    setTimeout(function () { clearInterval(timer); }, 120000);
+    setTimeout(function () {
+      clearInterval(timer);
+    }, 120000);
   }
 
   function listSection(listId) {
@@ -1176,7 +1240,9 @@
     // 不在」为准：列还在说明是我们临时显示的、用户中途没动过，再点一次藏回去；
     // 列已经没了（用户手动藏了 / 清单被删了）就别再多点那一下。
     if (current && document.getElementById(listId + "_label")) current.click();
-    setTimeout(function () { unparkColumn(listSection(listId)); }, 400);
+    setTimeout(function () {
+      unparkColumn(listSection(listId));
+    }, 400);
   }
 
   // 显隐清单时 Google 会整块替换侧栏行的 li 节点，闭包里攥着的 row 随时可能
@@ -1266,11 +1332,15 @@
 
   function installContextMenu() {
     // 捕获阶段拦截，WebKit 的原生右键菜单（含前进/后退）就不会出现。
-    document.addEventListener("contextmenu", function (event) {
-      if (event.defaultPrevented) return;
-      event.preventDefault();
-      uiCommand("contextMenu", { x: event.clientX, y: event.clientY });
-    }, true);
+    document.addEventListener(
+      "contextmenu",
+      function (event) {
+        if (event.defaultPrevented) return;
+        event.preventDefault();
+        uiCommand("contextMenu", { x: event.clientX, y: event.clientY });
+      },
+      true,
+    );
   }
 
   function observeUI() {
@@ -1307,12 +1377,15 @@
   var SPLASH_TIMEOUT = 8000;
   var SPLASH_POLL = 90;
   // 首屏就绪的信号：Tasks 自己的顶栏按钮组、侧栏清单行，或 Google 的页面容器。
-  var SPLASH_READY_SELECTOR = '.yVc39c, li[data-task-list-id], c-wiz';
-  var SPLASH_LOGO = '<svg viewBox="44 38 104 104" width="26" height="26" aria-hidden="true"><path fill="none" stroke="#fff" stroke-linecap="round" stroke-linejoin="round" stroke-width="15" d="m61 90 22.172 22.172a4 4 0 0 0 5.656 0L138 63"/></svg>';
+  var SPLASH_READY_SELECTOR = ".yVc39c, li[data-task-list-id], c-wiz";
+  var SPLASH_LOGO =
+    '<svg viewBox="44 38 104 104" width="26" height="26" aria-hidden="true"><path fill="none" stroke="#fff" stroke-linecap="round" stroke-linejoin="round" stroke-width="15" d="m61 90 22.172 22.172a4 4 0 0 0 5.656 0L138 63"/></svg>';
 
   function splashDark() {
     var mode = "system";
-    try { mode = localStorage.getItem(UI_THEME_KEY) || "system"; } catch (ignored) {}
+    try {
+      mode = localStorage.getItem(UI_THEME_KEY) || "system";
+    } catch (ignored) {}
     if (mode === "light") return false;
     if (mode === "dark") return true;
     try {
@@ -1352,7 +1425,9 @@
     // 用户已经在点页面了，说明遮罩该走了（也兜住首屏信号识别不出来的情况）。
     var events = ["pointerdown", "mousedown", "keydown", "wheel", "touchstart"];
     for (var index = 0; index < events.length; index++) {
-      try { window.addEventListener(events[index], hideSplash, true); } catch (ignored) {}
+      try {
+        window.addEventListener(events[index], hideSplash, true);
+      } catch (ignored) {}
     }
   }
 
@@ -1366,20 +1441,40 @@
     style.textContent = "@keyframes gtasks-splash-spin { to { transform: rotate(360deg); } }";
     var splash = document.createElement("div");
     splash.id = SPLASH_ID;
-    splash.setAttribute("style", [
-      "position:fixed", "left:0", "top:0", "right:0", "bottom:0", "z-index:2147483000",
-      "display:flex", "flex-direction:column", "align-items:center", "justify-content:center",
-      "background:" + palette.bg, "color:" + palette.fg, "pointer-events:none",
-      "font:13px/1.4 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'PingFang SC','Microsoft YaHei',sans-serif",
-      "opacity:1", "transition:opacity .24s ease"
-    ].join(";"));
+    splash.setAttribute(
+      "style",
+      [
+        "position:fixed",
+        "left:0",
+        "top:0",
+        "right:0",
+        "bottom:0",
+        "z-index:2147483000",
+        "display:flex",
+        "flex-direction:column",
+        "align-items:center",
+        "justify-content:center",
+        "background:" + palette.bg,
+        "color:" + palette.fg,
+        "pointer-events:none",
+        "font:13px/1.4 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'PingFang SC','Microsoft YaHei',sans-serif",
+        "opacity:1",
+        "transition:opacity .24s ease",
+      ].join(";"),
+    );
     splash.innerHTML =
-      '<div style="width:54px;height:54px;border-radius:16px;background:' + palette.accent +
-      ';display:flex;align-items:center;justify-content:center;margin-bottom:22px">' + SPLASH_LOGO + '</div>' +
+      '<div style="width:54px;height:54px;border-radius:16px;background:' +
+      palette.accent +
+      ';display:flex;align-items:center;justify-content:center;margin-bottom:22px">' +
+      SPLASH_LOGO +
+      "</div>" +
       '<div style="display:flex;align-items:center;gap:10px">' +
-      '<span style="width:15px;height:15px;border-radius:50%;border:2px solid ' + palette.accent +
+      '<span style="width:15px;height:15px;border-radius:50%;border:2px solid ' +
+      palette.accent +
       ';border-top-color:transparent;animation:gtasks-splash-spin .8s linear infinite"></span>' +
-      '<span>' + tt("session.splash", "正在载入 Google Tasks…") + '</span></div>';
+      "<span>" +
+      tt("session.splash", "正在载入 Google Tasks…") +
+      "</span></div>";
     (document.head || document.documentElement).appendChild(style);
     (document.body || document.documentElement).appendChild(splash);
     watchSplash();
@@ -1400,7 +1495,9 @@
       installContextMenu();
       installHeaderButtons();
       scheduleHeaderPlacement();
-      try { window.addEventListener("resize", replaceHeaderButtons); } catch (ignored) {}
+      try {
+        window.addEventListener("resize", replaceHeaderButtons);
+      } catch (ignored) {}
       decorateRows(document);
       decorateSupportMenu(document.querySelector(SUPPORT_MENU_SELECTOR));
       observeUI();
@@ -1431,21 +1528,24 @@
     window.__gtasksI18n = {
       lang: payload.lang || "zh",
       messages: payload.messages || {},
-      items: payload.items || []
+      items: payload.items || [],
     };
     // 缓存给下次启动的遮罩用（它跑在 document-start，等不到 Go 回话）。
-    try { localStorage.setItem(UI_I18N_KEY, JSON.stringify(window.__gtasksI18n)); } catch (ignored) {}
+    try {
+      localStorage.setItem(UI_I18N_KEY, JSON.stringify(window.__gtasksI18n));
+    } catch (ignored) {}
     relabelUI();
   };
 
   api.setThemeMode = function (mode, dark) {
     window.__gtaskThemeMode = UI_MODES.indexOf(mode) >= 0 ? mode : "system";
     // 存一份给下次启动的启动遮罩用：它跑在 document-start，等不到 Go 回话。
-    try { localStorage.setItem(UI_THEME_KEY, window.__gtaskThemeMode); } catch (ignored) {}
+    try {
+      localStorage.setItem(UI_THEME_KEY, window.__gtaskThemeMode);
+    } catch (ignored) {}
     renderThemeButton();
     verifyColorScheme(dark);
   };
-
 
   installInitDataRecorder();
 
@@ -1460,7 +1560,9 @@
   // That message is normally sent by the Wails runtime bundle, which is never
   // loaded on an external origin, so the bridge reports it itself.
   if (send) {
-    try { send("wails:runtime:ready"); } catch (ignored) {}
+    try {
+      send("wails:runtime:ready");
+    } catch (ignored) {}
   }
 
   api.announce();
@@ -1471,6 +1573,8 @@
   // so re-announce once the page has finished loading. The Go watcher also polls,
   // this just shortens the window where the login state looks stale.
   if (document.readyState !== "complete" && typeof window.addEventListener === "function") {
-    window.addEventListener("load", function () { api.announce(); });
+    window.addEventListener("load", function () {
+      api.announce();
+    });
   }
 })();

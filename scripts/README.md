@@ -1,12 +1,12 @@
 # 打包脚本 / Packaging scripts
 
-| 脚本 | 平台 | 产物（`build/bin/`） |
-|---|---|---|
-| `build-macos.sh` | macOS（amd64 / arm64） | `.dmg` |
-| `build-windows.sh` | Windows（amd64 / arm64） | `.exe` |
-| `build-linux.sh` | Linux（amd64 / arm64） | 裸二进制 + `.tar.gz`（+ `.deb` / `.rpm`，装了 fpm 时） |
-| `run-first-installed-local-mac.sh` | macOS（安装后修复） | 剥 ad-hoc 签名 + 重打 quarantine |
-| `verify-lang-switch.py` | 跨平台 | 语言 / 主题切换的端到端回归（`make verify`） |
+| 脚本                               | 平台                     | 产物（`build/bin/`）                                   |
+| ---------------------------------- | ------------------------ | ------------------------------------------------------ |
+| `build-macos.sh`                   | macOS（amd64 / arm64）   | `.dmg`                                                 |
+| `build-windows.sh`                 | Windows（amd64 / arm64） | `.exe`                                                 |
+| `build-linux.sh`                   | Linux（amd64 / arm64）   | 裸二进制 + `.tar.gz`（+ `.deb` / `.rpm`，装了 fpm 时） |
+| `run-first-installed-local-mac.sh` | macOS（安装后修复）      | 剥 ad-hoc 签名 + 重打 quarantine                       |
+| `verify-lang-switch.py`            | 跨平台                   | 语言 / 主题切换的端到端回归（`make verify`）           |
 
 三个 `build-*.sh` 都是 `./脚本 <版本号> [架构]`，架构默认取本机 `GOARCH`。
 它们是各平台打包步骤的唯一事实来源：`.github/workflows/build.yml` 直接调它们，
@@ -24,10 +24,12 @@ make checksums            # 为 build/bin/ 里的产物生成 sha256sums.txt
 ## 前置条件 / Prerequisites
 
 ### 所有平台 / All platforms
+
 - **Go 1.26+**（Wails v3.1.0 的要求；本机是 1.25 时 toolchain 会自动下载 1.26）
 - 国内网络可加 `GOPROXY=https://goproxy.cn,direct`（`Makefile` 已默认带上）
 
 ### macOS
+
 - Xcode Command Line Tools（Wails v3 的 darwin 后端走 cgo）
 - `hdiutil`（系统自带）——生成 DMG
 - 另一个架构可以交叉编译：`GOARCH=arm64` 由 Xcode 的 `clang -arch` 接管
@@ -35,11 +37,13 @@ make checksums            # 为 build/bin/ 里的产物生成 sha256sums.txt
   `make icon`（依赖本机 Chrome）
 
 ### Windows
+
 - 无构建依赖：Wails v3 通过 purego 加载 WebView2，`CGO_ENABLED=0` 即可，
   能从 macOS / Linux 直接交叉编译出 amd64 与 arm64
 - 运行时需要 **WebView2 Runtime**（Windows 10/11 一般已内置）
 
 ### Linux
+
 - 无构建依赖：走 purego 通道（`CGO_ENABLED=0 -tags purego`），
   amd64 / arm64 都能交叉编译，构建机不需要 gtk / webkit 的 dev 包
 - 运行时库：`libgtk-3-0`、`libwebkit2gtk-4.1-0`（Arch：`gtk3 webkit2gtk-4.1`）

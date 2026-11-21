@@ -7,24 +7,33 @@
 
 const ICON = {
   star: '<svg viewBox="0 0 24 24"><path d="M22 9.24l-7.19-.62L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21 12 17.27 18.18 21l-1.63-7.03L22 9.24zM12 15.4l-3.76 2.27 1-4.28-3.32-2.88 4.38-.38L12 6.1l1.71 4.04 4.38.38-3.32 2.88 1 4.28L12 15.4z"/></svg>',
-  starOn: '<svg viewBox="0 0 24 24"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg>',
+  starOn:
+    '<svg viewBox="0 0 24 24"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg>',
   check: '<svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>',
   list: '<svg viewBox="0 0 24 24"><path d="M4 6h16v2H4zm0 5h16v2H4zm0 5h16v2H4z"/></svg>',
-  calendar: '<svg viewBox="0 0 24 24"><path d="M19 3h-1V1h-2v2H8V1H6v2H5c-1.11 0-1.99.9-1.99 2L3 19c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H5V8h14v11zM7 10h5v5H7z"/></svg>',
+  calendar:
+    '<svg viewBox="0 0 24 24"><path d="M19 3h-1V1h-2v2H8V1H6v2H5c-1.11 0-1.99.9-1.99 2L3 19c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H5V8h14v11zM7 10h5v5H7z"/></svg>',
   repeat: '<svg viewBox="0 0 24 24"><path d="M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4z"/></svg>',
   subtask: '<svg viewBox="0 0 24 24"><path d="M4 6h16v2H4zm2 5h14v2H6zm3 5h11v2H9z"/></svg>',
   chevron: '<svg viewBox="0 0 24 24"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg>',
-  allTasks: '<svg viewBox="0 0 24 24"><path d="M22 5.18L10.59 16.6l-4.24-4.24 1.41-1.41 2.83 2.83 10-10L22 5.18zM19.79 10.22C19.92 10.79 20 11.39 20 12c0 4.42-3.58 8-8 8s-8-3.58-8-8 3.58-8 8-8c1.58 0 3.04.46 4.28 1.25l1.44-1.44C16.1 2.67 14.13 2 12 2 6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10c0-1.19-.22-2.33-.6-3.39l-1.61 1.61z"/></svg>',
+  allTasks:
+    '<svg viewBox="0 0 24 24"><path d="M22 5.18L10.59 16.6l-4.24-4.24 1.41-1.41 2.83 2.83 10-10L22 5.18zM19.79 10.22C19.92 10.79 20 11.39 20 12c0 4.42-3.58 8-8 8s-8-3.58-8-8 3.58-8 8-8c1.58 0 3.04.46 4.28 1.25l1.44-1.44C16.1 2.67 14.13 2 12 2 6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10c0-1.19-.22-2.33-.6-3.39l-1.61 1.61z"/></svg>',
   more: '<svg viewBox="0 0 24 24"><path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/></svg>',
-  trash: '<svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>',
+  trash:
+    '<svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>',
   add: '<svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>',
   expandLess: '<svg viewBox="0 0 24 24"><path d="M12 8l-6 6 1.41 1.41L12 10.83l4.59 4.58L12 12z"/></svg>',
   expandMore: '<svg viewBox="0 0 24 24"><path d="M16.59 8.59L12 13.17 7.41 8.59 6 10l6 6 6-6z"/></svg>',
-  refresh: '<svg viewBox="0 0 24 24"><path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-8 8s3.57 8 8 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>',
-  empty: '<svg viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H5V5h14v14zM7 10h2v7H7zm4-3h2v10h-2zm4 6h2v4h-2z"/></svg>',
-  themeLight: '<svg viewBox="0 0 24 24"><path d="M12 7c-2.76 0-5 2.24-5 5s2.24 5 5 5 5-2.24 5-5-2.24-5-5-5zM2 13h2c.55 0 1-.45 1-1s-.45-1-1-1H2c-.55 0-1 .45-1 1s.45 1 1 1zm18 0h2c.55 0 1-.45 1-1s-.45-1-1-1h-2c-.55 0-1 .45-1 1s.45 1 1 1zM11 2v2c0 .55.45 1 1 1s1-.45 1-1V2c0-.55-.45-1-1-1s-1 .45-1 1zm0 18v2c0 .55.45 1 1 1s1-.45 1-1v-2c0-.55-.45-1-1-1s-1 .45-1 1zM5.99 4.58c-.39-.39-1.03-.39-1.41 0-.39.39-.39 1.03 0 1.41l1.06 1.06c.39.39 1.03.39 1.41 0s.39-1.03 0-1.41L5.99 4.58zm12.37 12.37c-.39-.39-1.03-.39-1.41 0-.39.39-.39 1.03 0 1.41l1.06 1.06c.39.39 1.03.39 1.41 0 .39-.39.39-1.03 0-1.41l-1.06-1.06zm1.06-10.96c.39-.39.39-1.03 0-1.41-.39-.39-1.03-.39-1.41 0l-1.06 1.06c-.39.39-.39 1.03 0 1.41s1.03.39 1.41 0l1.06-1.06zM7.05 18.36c.39-.39.39-1.03 0-1.41-.39-.39-1.03-.39-1.41 0l-1.06 1.06c-.39.39-.39 1.03 0 1.41s1.03.39 1.41 0l1.06-1.06z"/></svg>',
-  themeDark: '<svg viewBox="0 0 24 24"><path d="M12 3c-4.97 0-9 4.03-9 9s4.03 9 9 9 9-4.03 9-9c0-.46-.04-.92-.1-1.36-.98 1.37-2.58 2.26-4.4 2.26-2.98 0-5.4-2.42-5.4-5.4 0-1.81.89-3.42 2.26-4.4-.44-.06-.9-.1-1.36-.1z"/></svg>',
-  themeAuto: '<svg viewBox="0 0 24 24"><path d="M10.85 12.65h2.3L12 9l-1.15 3.65zM20 8.69V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12 20 8.69zM14.3 16l-.7-2h-3.2l-.7 2H7.8L11 7h2l3.2 9h-1.9z"/></svg>',
+  refresh:
+    '<svg viewBox="0 0 24 24"><path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-8 8s3.57 8 8 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>',
+  empty:
+    '<svg viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H5V5h14v14zM7 10h2v7H7zm4-3h2v10h-2zm4 6h2v4h-2z"/></svg>',
+  themeLight:
+    '<svg viewBox="0 0 24 24"><path d="M12 7c-2.76 0-5 2.24-5 5s2.24 5 5 5 5-2.24 5-5-2.24-5-5-5zM2 13h2c.55 0 1-.45 1-1s-.45-1-1-1H2c-.55 0-1 .45-1 1s.45 1 1 1zm18 0h2c.55 0 1-.45 1-1s-.45-1-1-1h-2c-.55 0-1 .45-1 1s.45 1 1 1zM11 2v2c0 .55.45 1 1 1s1-.45 1-1V2c0-.55-.45-1-1-1s-1 .45-1 1zm0 18v2c0 .55.45 1 1 1s1-.45 1-1v-2c0-.55-.45-1-1-1s-1 .45-1 1zM5.99 4.58c-.39-.39-1.03-.39-1.41 0-.39.39-.39 1.03 0 1.41l1.06 1.06c.39.39 1.03.39 1.41 0s.39-1.03 0-1.41L5.99 4.58zm12.37 12.37c-.39-.39-1.03-.39-1.41 0-.39.39-.39 1.03 0 1.41l1.06 1.06c.39.39 1.03.39 1.41 0 .39-.39.39-1.03 0-1.41l-1.06-1.06zm1.06-10.96c.39-.39.39-1.03 0-1.41-.39-.39-1.03-.39-1.41 0l-1.06 1.06c-.39.39-.39 1.03 0 1.41s1.03.39 1.41 0l1.06-1.06zM7.05 18.36c.39-.39.39-1.03 0-1.41-.39-.39-1.03-.39-1.41 0l-1.06 1.06c-.39.39-.39 1.03 0 1.41s1.03.39 1.41 0l1.06-1.06z"/></svg>',
+  themeDark:
+    '<svg viewBox="0 0 24 24"><path d="M12 3c-4.97 0-9 4.03-9 9s4.03 9 9 9 9-4.03 9-9c0-.46-.04-.92-.1-1.36-.98 1.37-2.58 2.26-4.4 2.26-2.98 0-5.4-2.42-5.4-5.4 0-1.81.89-3.42 2.26-4.4-.44-.06-.9-.1-1.36-.1z"/></svg>',
+  themeAuto:
+    '<svg viewBox="0 0 24 24"><path d="M10.85 12.65h2.3L12 9l-1.15 3.65zM20 8.69V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12 20 8.69zM14.3 16l-.7-2h-3.2l-.7 2H7.8L11 7h2l3.2 9h-1.9z"/></svg>',
   lang: '<svg viewBox="0 0 24 24"><path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zm6.93 6h-2.95a15.65 15.65 0 0 0-1.38-3.56A8.03 8.03 0 0 1 18.92 8zM12 4.04c.83 1.2 1.48 2.53 1.91 3.96h-3.82c.43-1.43 1.08-2.76 1.91-3.96zM4.26 14C4.1 13.36 4 12.69 4 12s.1-1.36.26-2h3.38c-.08.66-.14 1.32-.14 2 0 .68.06 1.34.14 2H4.26zm.82 2h2.95c.32 1.25.78 2.45 1.38 3.56A7.987 7.987 0 0 1 5.08 16zm2.95-8H5.08a7.987 7.987 0 0 1 4.33-3.56A15.65 15.65 0 0 0 8.03 8zM12 19.96c-.83-1.2-1.48-2.53-1.91-3.96h3.82c-.43 1.43-1.08 2.76-1.91 3.96zM14.34 14H9.66c-.09-.66-.16-1.32-.16-2 0-.68.07-1.35.16-2h4.68c.09.65.16 1.32.16 2 0 .68-.07 1.34-.16 2zm.25 5.56c.6-1.11 1.06-2.31 1.38-3.56h2.95a8.03 8.03 0 0 1-4.33 3.56zM16.36 14c.08-.66.14-1.32.14-2 0-.68-.06-1.34-.14-2h3.38c.16.64.26 1.31.26 2s-.1 1.36-.26 2h-3.38z"/></svg>',
 };
 
@@ -134,7 +143,10 @@ function hideBanner() {
 
 function expiredBanner() {
   showBanner(t("main.bannerSession", "会话已失效（cookie 或 at 被 Google 拒绝），请在 Google 会话窗口里重新登录。"), [
-    { label: t("main.openLogin", "打开登录窗口"), onClick: () => api("/api/session", { method: "POST", body: { action: "show" } }).catch(() => {}) },
+    {
+      label: t("main.openLogin", "打开登录窗口"),
+      onClick: () => api("/api/session", { method: "POST", body: { action: "show" } }).catch(() => {}),
+    },
   ]);
 }
 
@@ -209,7 +221,10 @@ async function loadData() {
     }
     showBanner(t("main.bannerLoadFailed", "读取失败：{message}", { message: error.message }), [
       { label: t("main.retry", "重试"), onClick: () => loadData() },
-      { label: t("main.openLogin", "打开登录窗口"), onClick: () => api("/api/session", { method: "POST", body: { action: "show" } }).catch(() => {}) },
+      {
+        label: t("main.openLogin", "打开登录窗口"),
+        onClick: () => api("/api/session", { method: "POST", body: { action: "show" } }).catch(() => {}),
+      },
       { label: t("main.loadDemo", "载入演示数据"), onClick: () => toggleDemo(true) },
     ]);
   }
@@ -240,15 +255,73 @@ function seedDemo() {
     return d.toISOString().slice(0, 10);
   };
   store.tasks = [
-    { id: "t1", listId: "list-work", title: t("demo.t1", "回复设计评审邮件"), notes: t("demo.t1n", "附上最新一版的交互稿链接"), starred: true, completed: false, due: { date: iso(0), time: "18:00" } },
-    { id: "t2", listId: "list-work", title: t("demo.t2", "整理逆向抓包结果"), notes: "", starred: false, completed: false, due: { date: iso(1), time: "" }, recurrence: "每周" },
-    { id: "t3", listId: "list-work", title: t("demo.t3", "把 rpcid 固化进操作映射"), notes: "", starred: false, completed: false, parent: "t2" },
-    { id: "t4", listId: "list-work", title: t("demo.t4", "校对像素级还原度"), notes: t("demo.t4n", "和 tasks.google.com 并排比对"), starred: false, completed: true, completedAt: new Date(Date.now() - 2 * 86400000).toISOString(), due: { date: iso(-2), time: "" } },
-    { id: "t5", listId: "list-work", title: "准备季度规划材料", notes: "", starred: true, completed: false, due: { date: iso(3), time: "10:30" } },
+    {
+      id: "t1",
+      listId: "list-work",
+      title: t("demo.t1", "回复设计评审邮件"),
+      notes: t("demo.t1n", "附上最新一版的交互稿链接"),
+      starred: true,
+      completed: false,
+      due: { date: iso(0), time: "18:00" },
+    },
+    {
+      id: "t2",
+      listId: "list-work",
+      title: t("demo.t2", "整理逆向抓包结果"),
+      notes: "",
+      starred: false,
+      completed: false,
+      due: { date: iso(1), time: "" },
+      recurrence: "每周",
+    },
+    {
+      id: "t3",
+      listId: "list-work",
+      title: t("demo.t3", "把 rpcid 固化进操作映射"),
+      notes: "",
+      starred: false,
+      completed: false,
+      parent: "t2",
+    },
+    {
+      id: "t4",
+      listId: "list-work",
+      title: t("demo.t4", "校对像素级还原度"),
+      notes: t("demo.t4n", "和 tasks.google.com 并排比对"),
+      starred: false,
+      completed: true,
+      completedAt: new Date(Date.now() - 2 * 86400000).toISOString(),
+      due: { date: iso(-2), time: "" },
+    },
+    {
+      id: "t5",
+      listId: "list-work",
+      title: "准备季度规划材料",
+      notes: "",
+      starred: true,
+      completed: false,
+      due: { date: iso(3), time: "10:30" },
+    },
     { id: "t6", listId: "list-work", title: "评审 batchexecute 解码结果", notes: "", starred: false, completed: false },
-    { id: "t7", listId: "list-personal", title: "预约牙医", notes: "", starred: false, completed: false, due: { date: iso(-1), time: "09:00" } },
+    {
+      id: "t7",
+      listId: "list-personal",
+      title: "预约牙医",
+      notes: "",
+      starred: false,
+      completed: false,
+      due: { date: iso(-1), time: "09:00" },
+    },
     { id: "t8", listId: "list-shopping", title: t("demo.t8", "咖啡豆"), notes: "", starred: false, completed: false },
-    { id: "t9", listId: "list-shopping", title: t("demo.t9", "滤纸"), notes: "", starred: false, completed: true, completedAt: new Date(Date.now() - 86400000).toISOString() },
+    {
+      id: "t9",
+      listId: "list-shopping",
+      title: t("demo.t9", "滤纸"),
+      notes: "",
+      starred: false,
+      completed: true,
+      completedAt: new Date(Date.now() - 86400000).toISOString(),
+    },
   ];
 }
 
@@ -298,9 +371,12 @@ function orderedTasks(tasks) {
 
 function activeListTitle() {
   switch (store.activeListId) {
-    case VIRTUAL_STARRED: return t("main.starred", "已加星标");
-    case VIRTUAL_ALL: return t("main.allTasks", "所有任务");
-    default: return (store.lists.find((l) => l.id === store.activeListId) || {}).title || t("main.allTasks", "所有任务");
+    case VIRTUAL_STARRED:
+      return t("main.starred", "已加星标");
+    case VIRTUAL_ALL:
+      return t("main.allTasks", "所有任务");
+    default:
+      return (store.lists.find((l) => l.id === store.activeListId) || {}).title || t("main.allTasks", "所有任务");
   }
 }
 
@@ -331,18 +407,22 @@ function navItem({ id, icon, label, count, active, onClick }) {
 function renderSidebar() {
   const nav = $("listNav");
   nav.innerHTML = "";
-  nav.append(navItem({
-    id: VIRTUAL_ALL,
-    icon: ICON.allTasks,
-    label: t("main.allTasks", "所有任务"),
-    active: store.activeListId === VIRTUAL_ALL,
-  }));
-  nav.append(navItem({
-    id: VIRTUAL_STARRED,
-    icon: ICON.star,
-    label: t("main.starred", "已加星标"),
-    active: store.activeListId === VIRTUAL_STARRED,
-  }));
+  nav.append(
+    navItem({
+      id: VIRTUAL_ALL,
+      icon: ICON.allTasks,
+      label: t("main.allTasks", "所有任务"),
+      active: store.activeListId === VIRTUAL_ALL,
+    }),
+  );
+  nav.append(
+    navItem({
+      id: VIRTUAL_STARRED,
+      icon: ICON.star,
+      label: t("main.starred", "已加星标"),
+      active: store.activeListId === VIRTUAL_STARRED,
+    }),
+  );
 
   const head = document.createElement("div");
   head.className = "nav-group-head";
@@ -351,7 +431,9 @@ function renderSidebar() {
   const collapse = document.createElement("button");
   collapse.className = "icon-btn tiny";
   collapse.innerHTML = store.listsCollapsed ? ICON.expandMore : ICON.expandLess;
-  collapse.title = store.listsCollapsed ? t("main.listsExpand", "展开任务列表") : t("main.listsCollapse", "收起任务列表");
+  collapse.title = store.listsCollapsed
+    ? t("main.listsExpand", "展开任务列表")
+    : t("main.listsCollapse", "收起任务列表");
   collapse.addEventListener("click", () => {
     store.listsCollapsed = !store.listsCollapsed;
     renderSidebar();
@@ -362,19 +444,23 @@ function renderSidebar() {
   if (store.listsCollapsed) return;
 
   for (const list of store.lists) {
-    nav.append(navItem({
-      id: list.id,
-      icon: ICON.list,
-      label: list.title,
-      count: list.incomplete,
-      active: store.activeListId === list.id,
-    }));
+    nav.append(
+      navItem({
+        id: list.id,
+        icon: ICON.list,
+        label: list.title,
+        count: list.incomplete,
+        active: store.activeListId === list.id,
+      }),
+    );
   }
-  nav.append(navItem({
-    icon: ICON.add,
-    label: t("main.newList", "新建任务列表"),
-    onClick: () => $("btnNewList").click(),
-  }));
+  nav.append(
+    navItem({
+      icon: ICON.add,
+      label: t("main.newList", "新建任务列表"),
+      onClick: () => $("btnNewList").click(),
+    }),
+  );
 }
 
 function renderAccount() {
@@ -433,7 +519,9 @@ function renderComposerHint() {
     return;
   }
   const target = store.lists.find((list) => list.id === targetListId());
-  input.placeholder = target ? t("main.addTaskTo", "添加到「{title}」", { title: target.title }) : t("main.addTask", "添加任务");
+  input.placeholder = target
+    ? t("main.addTaskTo", "添加到「{title}」", { title: target.title })
+    : t("main.addTask", "添加任务");
 }
 
 function emptyState(text) {
@@ -441,7 +529,8 @@ function emptyState(text) {
   empty.className = "empty";
   empty.innerHTML = ICON.empty;
   const line = document.createElement("div");
-  line.textContent = text || (store.demo ? t("main.emptyAllDone", "太好了，没有待办任务！") : t("main.emptyNone", "暂无任务"));
+  line.textContent =
+    text || (store.demo ? t("main.emptyAllDone", "太好了，没有待办任务！") : t("main.emptyNone", "暂无任务"));
   empty.append(line);
   return empty;
 }
@@ -502,7 +591,11 @@ function completedToggle(list, total, loaded) {
 function partialHint(missing) {
   const row = document.createElement("div");
   row.className = "partial-hint";
-  row.textContent = t("main.completedMore", "还有 {missing} 条已完成任务未载入（快照每个清单只返回前 10 条，需要 listTasks 的 rpcid 翻页）", { missing });
+  row.textContent = t(
+    "main.completedMore",
+    "还有 {missing} 条已完成任务未载入（快照每个清单只返回前 10 条，需要 listTasks 的 rpcid 翻页）",
+    { missing },
+  );
   return row;
 }
 
@@ -521,7 +614,10 @@ function formatCompletedDate(value) {
 
 function renderTask(task) {
   const row = document.createElement("div");
-  row.className = `task depth-${task.depth || 0}` + (task.completed ? " done" : "") + (task.id === store.activeTaskId ? " selected" : "");
+  row.className =
+    `task depth-${task.depth || 0}` +
+    (task.completed ? " done" : "") +
+    (task.id === store.activeTaskId ? " selected" : "");
   row.dataset.id = task.id;
   row.addEventListener("click", () => openDetail(task.id));
 
@@ -995,7 +1091,12 @@ function bindUI() {
 
   $("btnListMenu").addEventListener("click", () => {
     const ready = [...store.ops.entries()].filter(([, v]) => v).map(([k]) => k);
-    toast(ready.length ? t("main.toastOpsSaved", "已固化操作: {ops}", { ops: ready.join(", ") }) : t("main.toastOpsNone", "还没有固化任何 rpcid"), ready.length === 0);
+    toast(
+      ready.length
+        ? t("main.toastOpsSaved", "已固化操作: {ops}", { ops: ready.join(", ") })
+        : t("main.toastOpsNone", "还没有固化任何 rpcid"),
+      ready.length === 0,
+    );
   });
 }
 
