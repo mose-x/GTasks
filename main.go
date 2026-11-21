@@ -214,7 +214,8 @@ func main() {
 		})
 		return win
 	}
-	newWorkbenchWindow()
+	// 工作台是逆向工具，不跟着启动弹出来：需要时从会话页「?」菜单里开，
+	// 关掉之后再点也会按需重建。
 
 	var workbenchMu sync.Mutex
 	openWorkbench := func() {

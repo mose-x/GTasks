@@ -321,8 +321,10 @@ go run .             # 或 go build -o gtasks . && ./gtasks
 三个目标都已通过 `go build` 验证（Windows amd64/arm64、Linux amd64 purego、macOS arm64）；
 Windows 与 Linux 的**实机冒烟测试还没做**。
 
-启动后有三个窗口：**Google Tasks**（主界面）、**逆向工作台**、
+启动后有两个窗口：**Google Tasks**（主界面）与
 **Google 会话**（加载 `tasks.google.com`，未登录会自动跳到 Google 登录页）。
+**逆向工作台**默认不弹，需要时从会话页顶栏「?」菜单里的「GTasks 工作台」打开
+（关掉后再点会按需重建）。
 
 主题三档（明亮 / 暗黑 / 跟随系统）由 Go 统一持有，主界面侧栏和会话页顶栏各有一个按钮，
 任一处切换全端同步；深色沿用 Google 网页版暗色规范（底 `#202124`、正文 `#e8eaed`、
