@@ -22,6 +22,13 @@ import (
 //go:embed bootstrap.js
 var BootstrapJS string
 
+// EarlyPaintJS 是 document-start 的早遮罩脚本：macOS 上由 internal/appkit 以
+// WKUserScript 注入主窗口，抢在 Google 首帧之前盖遮罩 / 藏九宫格（bootstrap 要
+// 等 finish-navigation 才跑，盖不住首帧到加载完成那一段）。
+//
+//go:embed earlypaint.js
+var EarlyPaintJS string
+
 // reportsMainFrame records whether the Wails backend fills in
 // OriginInfo.IsMainFrame. Only the darwin backend does: the WebView2 and
 // WebKitGTK message paths leave the field false for every frame, so enforcing

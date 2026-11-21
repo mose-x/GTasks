@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"gtasks/internal/api"
+	"gtasks/internal/appkit"
 	"gtasks/internal/batchexec"
 	"gtasks/internal/bridge"
 	"gtasks/internal/i18n"
@@ -166,6 +167,9 @@ func main() {
 		mainOptions.HTML = bridge.RedirectHTML(tasksURLFor(i18nManager.Lang()))
 	}
 	mainWindow := app.Window.NewWithOptions(mainOptions)
+	// Wails 在 macOS 上要等加载完成才跑 bootstrap，首帧到加载完成之间 Google
+	// 默认顶栏会露出来；补一个 document-start 用户脚本把这段也盖住。
+	appkit.AddDocumentStartScript(windowTitle, bridge.EarlyPaintJS)
 	// 保存的主题要在原生句柄就绪后立刻补上：窗口刚建时原生外观跟着系统走，
 	// 不等句柄就设的话，「明亮 / 暗黑」首屏会先按系统外观闪一下。
 	applyWindowThemeSoon(mainWindow, themeManager.Mode)
