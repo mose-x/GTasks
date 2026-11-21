@@ -1272,7 +1272,7 @@
         current.setAttribute("data-gtasks-tempshow", "1");
       }
     });
-    observer.observe(document.body, { childList: true, subtree: true });
+    observer.observe(document.body || document.documentElement, { childList: true, subtree: true });
     row.setAttribute("data-gtasks-tempshow", "1");
     markInternalRpc(2500);
     row.click();
@@ -1363,7 +1363,7 @@
       }
       if (needsHeader) installHeaderButtons();
     });
-    observer.observe(document.body, { childList: true, subtree: true });
+    observer.observe(document.body || document.documentElement, { childList: true, subtree: true });
   }
 
   // -------------------------------------------------------------- 启动遮罩
@@ -1490,14 +1490,20 @@
     if (!uiAvailable() || location.hostname !== "tasks.google.com") return;
     // 遮罩要抢在页面自己的首帧之前，所以放在最前面，且不受「已安装」短路影响。
     installSplash();
+    // 隐藏九宫格 / 顶栏改排的样式同样要抢在首帧之前：这份 HTML 解压后有两兆多，
+    // DOMContentLoaded 得等整份文档解析完，等着的话 Google 默认顶栏会先闪一秒。
+    installUIStyles();
     if (window.__gtaskUIInstalled) {
       relabelUI();
       decorateRows(document);
       return;
     }
     window.__gtaskUIInstalled = true;
+    // 顶栏按钮也不等 DOMContentLoaded：脚本一执行就盯着节点流，「?」一解析出来
+    // 立刻插按钮，默认顶栏就没有单独露脸的机会（macOS 上首帧那一段由 earlypaint.js
+    // 以 document-start 脚本盖住，见 internal/appkit）。
+    observeUI();
     var boot = function () {
-      installUIStyles();
       installContextMenu();
       installHeaderButtons();
       scheduleHeaderPlacement();
@@ -1506,7 +1512,6 @@
       } catch (ignored) {}
       decorateRows(document);
       decorateSupportMenu(document.querySelector(SUPPORT_MENU_SELECTOR));
-      observeUI();
     };
     if (document.body) boot();
     else document.addEventListener("DOMContentLoaded", boot);
