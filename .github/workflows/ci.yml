@@ -1,0 +1,92 @@
+name: CI
+
+permissions:
+  contents: read
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# 同一个 ref 上有新提交就取消在跑的那次，别把 CI 时间浪费在已被取代的提交上。
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # gofmt / go vet / shell 语法都与平台无关，只在 Linux 上跑一遍。
+  lint:
+    name: fmt + vet
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache: true
+
+      - name: Check formatting
+        run: |
+          if [ -n "$(gofmt -l .)" ]; then
+            echo "::error::以下文件需要 gofmt:"
+            gofmt -l .
+            exit 1
+          fi
+
+      - name: Go vet
+        run: CGO_ENABLED=0 go vet -tags purego ./...
+
+      - name: Shell syntax check
+        run: |
+          for f in scripts/*.sh build/*.sh; do bash -n "$f" || exit 1; done
+
+      - name: Python syntax check
+        run: python3 -m py_compile scripts/verify-lang-switch.py
+
+  # 三个平台各跑一遍测试：Windows 的 WebView2 注入路径、macOS 的
+  # IsMainFrame 过滤都只在对应平台上有意义。Linux 走 purego 通道
+  # （CGO_ENABLED=0 + -tags purego），构建机不需要 gtk / webkit dev 包。
+  test:
+    name: test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            cgo: '0'
+            tags: '-tags purego'
+          - os: windows-latest
+            cgo: '0'
+            tags: ''
+          - os: macos-latest
+            cgo: '1'
+            tags: ''
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    env:
+      CGO_ENABLED: ${{ matrix.cgo }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache: true
+
+      # internal/bridge 用 Node 把 bootstrap.js 跑在伪造的 tasks.google.com 里，
+      # 没有 node 时那批断言会自动跳过，所以这里显式装上。
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Build
+        run: go build ${{ matrix.tags }} ./...
+
+      - name: Test
+        run: go test ${{ matrix.tags }} ./...

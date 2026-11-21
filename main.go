@@ -54,11 +54,21 @@ const (
 	workbenchWindowTitle = "GTasks 工作台"
 )
 
+// version 由打包脚本用 -ldflags "-X main.version=..." 写入（见 Makefile 与
+// scripts/build-*.sh）；go run / go build 时保持 dev。
+var version = "dev"
+
 func main() {
+	if len(os.Args) > 1 && (os.Args[1] == "-version" || os.Args[1] == "--version" || os.Args[1] == "version") {
+		fmt.Println(version)
+		return
+	}
+
 	dataDir, err := api.DataDir()
 	if err != nil {
 		log.Printf("无法定位数据目录，抓包日志与操作表将只存在内存中: %v", err)
 	}
+	log.Printf("GTasks %s（%s/%s）", version, runtime.GOOS, runtime.GOARCH)
 
 	sessionBridge := bridge.New()
 	recorder := api.NewRecorder(captureRingLimit)

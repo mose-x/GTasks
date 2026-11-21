@@ -1,0 +1,198 @@
+name: Build & Release
+
+permissions:
+  contents: read
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+# 同一个 ref 的构建串行（例如删掉标签重推），避免两条发布流水线交叉写同一份产物。
+# 不设 cancel-in-progress：发布构建跑到一半被掐掉比让它先跑完更糟。
+concurrency:
+  group: build-${{ github.ref }}
+
+env:
+  GO_VERSION: '1.26'
+  # 脚本里的默认值是国内镜像，CI 用官方 proxy 更快也更稳。
+  GOPROXY: 'https://proxy.golang.org,direct'
+
+jobs:
+  # ====== Windows ======
+  # Wails v3 在 Windows 上通过 purego 加载 WebView2，不需要 cgo，
+  # 所以 arm64 也能在 amd64 runner 上交叉编译。
+  build-windows:
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64]
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Compute version
+        # 标签形如 refs/tags/v1.0.0 -> 版本 1.0.0；workflow_dispatch 没有标签时
+        # 落到 0.0.0-dev。
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          if [ -z "$VERSION" ] || [ "$VERSION" = "$GITHUB_REF" ]; then
+            VERSION="0.0.0-dev"
+          fi
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+
+      - name: Build & package
+        shell: bash
+        run: bash scripts/build-windows.sh "$VERSION" "${{ matrix.arch }}"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-${{ matrix.arch }}-assets
+          path: build/bin/gtasks-${{ env.VERSION }}-*
+
+  # ====== macOS ======
+  # 产物不做代码签名，也不做 ad-hoc 签名：严格 MDM 管控的 Mac 上 ad-hoc 会被
+  # amfid 以 -423 拒绝，比未签名更糟；DMG 会主动打上 com.apple.quarantine，
+  # 让拖进 /Applications 的 .app 走 Gatekeeper 的「右键 → 打开」旁路。
+  # 详见 scripts/README.md 的 MDM 一节。
+  build-macos:
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64]
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Compute version
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          if [ -z "$VERSION" ] || [ "$VERSION" = "$GITHUB_REF" ]; then
+            VERSION="0.0.0-dev"
+          fi
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+
+      - name: Build & package
+        shell: bash
+        run: bash scripts/build-macos.sh "$VERSION" "${{ matrix.arch }}"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-${{ matrix.arch }}-assets
+          path: build/bin/gtasks-${{ env.VERSION }}-*
+
+  # ====== Linux ======
+  # purego 通道（CGO_ENABLED=0 -tags purego）交叉编译，runner 不需要 gtk /
+  # webkit 的 dev 包。.deb / .rpm 依赖 fpm，装不上就只发裸二进制与 tar.gz。
+  build-linux:
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Compute version
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          if [ -z "$VERSION" ] || [ "$VERSION" = "$GITHUB_REF" ]; then
+            VERSION="0.0.0-dev"
+          fi
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+
+      - name: Install fpm (best effort)
+        continue-on-error: true
+        run: sudo gem install fpm --no-document
+
+      - name: Build & package
+        run: bash scripts/build-linux.sh "$VERSION" "${{ matrix.arch }}"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-${{ matrix.arch }}-assets
+          path: build/bin/gtasks-${{ env.VERSION }}-*
+
+  # ====== Release ======
+  release:
+    needs: [build-windows, build-macos, build-linux]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: staging
+          # 全部产物摊平到 staging/ 下，而不是每个 artifact 一个子目录
+          # （download-artifact 的默认行为）。否则 sha256sum 的通配会匹配到
+          # 外层目录而不是文件本身。
+          merge-multiple: true
+
+      - name: List staged assets
+        run: ls -la staging
+
+      - name: Detect pre-release tag
+        # 带 -rc / -beta / -alpha / -pre / -dev 后缀的标签标成 pre-release，
+        # 这样 releases/latest 不会把 rc 推给用稳定版的用户。
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          case "$TAG" in
+            *-rc*|*-beta*|*-alpha*|*-pre*|*-dev*)
+              echo "IS_PRERELEASE=true" >> $GITHUB_ENV
+              echo "标签 $TAG 带预发布后缀 -> 标为 pre-release（不进 releases/latest）"
+              ;;
+            *)
+              echo "IS_PRERELEASE=false" >> $GITHUB_ENV
+              echo "标签 $TAG 是正式版 -> 进 releases/latest"
+              ;;
+          esac
+
+      - name: Generate sha256sums.txt
+        # sha256sums.txt 作为独立资产发布，用户可以逐个校验下载物。
+        # 只哈希二进制产物，它自己靠 gtasks-* 前缀之外的名字排除在外。
+        run: |
+          set -eu
+          cd staging
+          sha256sum gtasks-* > sha256sums.txt
+          echo "--- sha256sums.txt ---"
+          cat sha256sums.txt
+
+      - name: Create Release
+        # 直接发布（draft: false），让 /releases/latest 立刻可解析。
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            staging/gtasks-*
+            staging/sha256sums.txt
+          draft: false
+          prerelease: ${{ env.IS_PRERELEASE }}
+          generate_release_notes: true

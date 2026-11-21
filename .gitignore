@@ -22,3 +22,7 @@ operations.json.local
 .idea/
 .vscode/
 *.swp
+
+# Python 缓存（scripts/verify-lang-switch.py 的语法检查会产生）
+__pycache__/
+*.pyc

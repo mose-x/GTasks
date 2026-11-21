@@ -1,452 +1,600 @@
-# GTasks — Google Tasks 桌面客户端（Wails v3 + Go）
+# GTasks — a Google Tasks desktop client (Wails v3 + Go)
 
-Google Tasks 的第三方桌面客户端。目标：**界面与网页版一致**，登录走 **Google 原生页面**，
-数据面覆盖官方 API 拿不到的能力（星标 / 截止时分 / 重复）。
+**Language**: English | [简体中文](README.ZH_CN.md)
 
-当前阶段包含两部分：
+A third-party desktop client for Google Tasks. Goals: **a UI identical to the web app**,
+sign-in through **Google's own pages**, and data-plane coverage for the things the
+official API cannot do (stars / due times / recurrence).
 
-1. **主界面** — 按 `tasks.google.com` 还原的浅色主题界面（侧栏 / 任务列表 / 详情面板），
-   带演示数据模式，可以在 rpcid 尚未发现时先校对还原度。
-2. **逆向工作台** — 独立窗口，用来登录、抓包、把抓到的 rpcid 固化成可复用的「操作」。
+At this stage there are two parts:
 
-> ⚠️ 本项目通过非公开接口访问 Google 服务，违反 [Google 服务条款](https://policies.google.com/terms)。
-> 仅供个人学习使用，**账号风险由使用者自行承担**。
+1. **Main window** — a light-theme UI modelled on `tasks.google.com` (sidebar / task
+   list / detail panel), with a demo-data mode so fidelity can be checked before a
+   given rpcid has been discovered.
+2. **Reverse-engineering workbench** — a separate window used to sign in, capture
+   traffic, and freeze captured rpcids into reusable "operations".
 
-## 为什么是这个架构
+> ⚠️ This project talks to Google through undocumented endpoints, which violates the
+> [Google Terms of Service](https://policies.google.com). For personal study only —
+> **the account risk is entirely yours**.
 
-官方 Tasks API v1 覆盖不了网页版的全部能力。以 `google.golang.org/api@v0.316.0` 的
-`tasks/v1/tasks-gen.go` 为准，`Task` 资源里**完全没有** `starred` / `recurrence` /
-`reminder` / `dueTime` 字段，方法也只有 `clear` `delete` `get` `insert` `list` `move`
-`patch` `update` 八个。缺的是：
+## Why this architecture
 
-- ⭐ 星标 — 官方 API 无法读写
-- 🕐 截止时间的**时分** — `due` 字段只保留日期
-- 🔁 重复规则、🔔 提醒 — 官方 API 不存在
+The official Tasks API v1 does not cover everything the web app can do. Taking
+`tasks/v1/tasks-gen.go` from `google.golang.org/api@v0.316.0` as ground truth, the
+`Task` resource has **no** `starred` / `recurrence` / `reminder` / `dueTime` fields at
+all, and the only methods are `clear` `delete` `get` `insert` `list` `move` `patch`
+`update`. Missing:
 
-而内部 `batchexecute` 接口有两个硬约束：OAuth Bearer token **不认**，只认网页会话
-cookie（`__Secure-1PSID` 等，且是 httpOnly）；请求还需要 `at`（`SNlM0e`）和
-`bl`（build label）。
+- ⭐ Stars — not readable or writable through the official API
+- 🕐 The **time of day** on a due date — `due` keeps the date only
+- 🔁 Recurrence rules, 🔔 reminders — do not exist in the official API
 
-常规做法是"把 cookie 抓到 Go 里自己发请求"，跨平台且脆弱。本项目换成：
+The internal `batchexecute` endpoint comes with two hard constraints: it does **not**
+accept an OAuth bearer token, only the web session cookies (`__Secure-1PSID` and
+friends, all httpOnly); and each request also needs `at` (`SNlM0e`) and `bl` (build
+label).
+
+The usual approach is "scrape the cookies into Go and issue the requests yourself",
+which is cross-platform but brittle. This project instead does:
 
 ```
 ┌────────────────┐  ┌────────────────┐   ┌──────────────────────────────┐
-│ 主窗口          │  │ 工作台窗口      │   │ 会话窗口（可自动隐藏）        │
+│ Main window     │  │ Workbench      │   │ Session window (auto-hidden) │
 │ /              │  │ /workbench.html│   │ https://tasks.google.com/    │
-│ Tasks 界面      │  │ 抓包 / 固化     │   │ Google 原生登录页 + 网页版    │
-│                │  │                │   │ ← bootstrap.js 注入          │
+│ Tasks UI       │  │ capture/freeze │   │ Google sign-in + web app     │
+│                │  │                │   │ ← bootstrap.js injected      │
 └───────┬────────┘  └───────┬────────┘   └──────────┬────────▲──────────┘
         │ HTTP (asset server)                       │ ExecJS │ external
         ▼                                           ▼        │ postMessage
 ┌────────────────────────────────────────────────────────────┴──────────────┐
 │ api.Handler → tasks.Service → tasks.Registry → batchexec.Client           │
-│                                ↘ session.Watcher（登录状态轮询）           │
+│                                ↘ session.Watcher (login-state polling)     │
 └───────────────────────────────────────────────────────────────────────────┘
 ```
 
-**关键点：所有 Google 请求都由会话窗口页面内部的 `fetch` 发出。**
+**The key point: every Google request is issued by `fetch` inside the session
+window's own page.**
 
-- cookie 由浏览器自动附加，Go 端永远接触不到任何凭据
-- `at` / `bl` 直接读页面里的 `window.WIZ_global_data`，不用抓 HTML
-- UA、`X-Same-Domain`、同源策略全部是真实浏览器的行为
-- 登录就是 Google 自己的登录页，**不需要 OAuth client_id、不需要 Google 审核**
+- Cookies are attached by the browser; the Go side never touches a credential
+- `at` / `bl` are read straight from `window.WIZ_global_data`, no HTML scraping
+- UA, `X-Same-Domain`, same-origin policy — all genuine browser behaviour
+- Sign-in is Google's own login page: **no OAuth client_id, no Google review**
 
-### 解锁 `ExecJS` 的技巧
+### The trick that unlocks `ExecJS`
 
-Wails v3 的 `WebviewWindow.ExecJS()` 有 `runtimeLoaded` 门控
-（`pkg/application/webview_window.go:701`），只有收到页面发来的 `wails:runtime:ready`
-才会置位（同文件 `:884`）。外部域名的页面永远不会加载 Wails runtime bundle，
-所以 `ExecJS` 会把脚本静默塞进队列永不执行。
+Wails v3's `WebviewWindow.ExecJS()` is gated on `runtimeLoaded`
+(`pkg/application/webview_window.go:701`), which is only set once the page sends
+`wails:runtime:ready` (same file, `:884`). A page from an external origin never loads
+the Wails runtime bundle, so `ExecJS` silently queues scripts that never run.
 
-`internal/bridge/bootstrap.js` 通过 `WebviewWindowOptions.JS` 注入，它做的第一件事就是
-自己回发这条保留消息：
+`internal/bridge/bootstrap.js` is injected through `WebviewWindowOptions.JS`, and the
+first thing it does is send that reserved message itself:
 
 ```js
 send("wails:runtime:ready");   // → WebviewWindow.HandleMessage → runtimeLoaded = true
 ```
 
-于是 `ExecJS` 恢复正常，**不需要 cgo、不需要读原生 cookie store、不需要 fork Wails**，
-三个平台通用。回传方向走 Wails 早就注册好的消息通道
-（macOS `webkit.messageHandlers.external`，`webview_window_darwin.go:193`；Linux 同名
-handler，`register_script_message_handler(manager, "external")`；Windows
-`chrome.webview.postMessage` → `TryGetWebMessageAsString`），由
-`application.Options.RawMessageHandler` 接收 —— 这个 handler 与页面来源无关。
+`ExecJS` then works normally — **no cgo, no reading the native cookie store, no Wails
+fork** — on all three platforms. The return path uses the message channel Wails already
+registers (macOS `webkit.messageHandlers.external`, `webview_window_darwin.go:193`;
+Linux the same handler name, `register_script_message_handler(manager, "external")`;
+Windows `chrome.webview.postMessage` → `TryGetWebMessageAsString`), received by
+`application.Options.RawMessageHandler` — a handler that is independent of page origin.
 
-### 三个平台的注入时机不一样
+### Injection timing differs per platform
 
-| 平台 | 注入点 | 时机 |
+| Platform | Injection point | When |
 | --- | --- | --- |
-| macOS | `webview_window_darwin.go:1755` | `WebViewDidFinishNavigation` 之后 `execJS` |
-| Linux | `webview_window_linux.go:527` | `WindowLoadFinished` 之后 `execJS` |
-| Windows | `webview_window_windows.go:2835` | **仅 HTML 窗口**：`chromium.Init` → `AddScriptToExecuteOnDocumentCreated` |
+| macOS | `webview_window_darwin.go:1755` | `execJS` after `WebViewDidFinishNavigation` |
+| Linux | `webview_window_linux.go:527` | `execJS` after `WindowLoadFinished` |
+| Windows | `webview_window_windows.go:2835` | **HTML windows only**: `chromium.Init` → `AddScriptToExecuteOnDocumentCreated` |
 
-Windows 那一行是关键坑：`navigateInitialPage` 只在 `options.HTML != ""` 分支里处理
-`options.JS`，外部 URL 窗口的 `default:` 分支只调 `setURL`，**bootstrap 永远不会注入**。
-所以 `main.go` 在 Windows 上改用 `bridge.RedirectHTML(googleTasksURL)`：先加载一个只含
-`location.replace(...)` 的桩文档，让 Wails 走 HTML 分支把 bootstrap 注册进
-`AddScriptToExecuteOnDocumentCreated`。该注册对整个 webview 生命周期有效，之后每个文档
-（含 `accounts.google.com` 往返）都在 **document start** 阶段注入 —— 比 macOS/Linux 更早，
-首屏 RPC 也抓得到。
+That Windows line is the important trap: `navigateInitialPage` only handles `options.JS`
+in the `options.HTML != ""` branch; for an external-URL window the `default:` branch just
+calls `setURL`, so **the bootstrap would never be injected**. Therefore `main.go` uses
+`bridge.RedirectHTML(googleTasksURL)` on Windows: load a stub document containing only
+`location.replace(...)` so Wails takes the HTML branch and registers the bootstrap with
+`AddScriptToExecuteOnDocumentCreated`. That registration lives for the whole webview
+lifetime, so every subsequent document (including the `accounts.google.com` round trip)
+is injected at **document start** — earlier than macOS/Linux, and early enough to capture
+first-paint RPCs.
 
-代价是脚本会在该 webview 的**每个**文档里运行，所以 `bootstrap.js` 开头有 Google 域名
-守卫（`isGoogleHost()`）：桩文档和非 Google 页面直接 return，既不会误报登录状态，也不会
-提前解锁 `ExecJS`。
+The cost is that the script runs in **every** document of that webview, so
+`bootstrap.js` opens with a Google-domain guard (`isGoogleHost()`): the stub document and
+any non-Google page return immediately, which both avoids bogus login state and avoids
+unlocking `ExecJS` too early.
 
-另一个平台差异：`OriginInfo.IsMainFrame` **只有 darwin 后端会填**
-（`application_darwin.go:409`），Windows（`webview_window_windows.go:2475`）和 WebKitGTK
-（`linux_cgo.go:1711`）恒为 false。`bridge.HandleRaw` 因此只在该字段可信的平台
-（`reportsMainFrame = runtime.GOOS == "darwin"`）上过滤子框架，其余平台靠协议前缀 +
-窗口名过滤 —— 否则整条桥接会被静默丢弃。
+Another platform difference: `OriginInfo.IsMainFrame` is **only populated by the darwin
+backend** (`application_darwin.go:409`); Windows (`webview_window_windows.go:2475`) and
+WebKitGTK (`linux_cgo.go:1711`) always report false. `bridge.HandleRaw` therefore filters
+subframes only on platforms where the field is trustworthy
+(`reportsMainFrame = runtime.GOOS == "darwin"`), and elsewhere filters by protocol prefix
+plus window name — otherwise the whole bridge would be dropped silently.
 
-### 会话韧性：识别「看着登录、实际掉线」
+### Session resilience: detecting "looks signed in, actually dead"
 
-cookie 失效之后 SPA 仍留着旧的 `WIZ_global_data`，页面上 `SNlM0e` 还在、probe 仍报「已登录」，
-但每个 RPC 都会 401 或被 302 去登录页。所以 watcher 每 8 轮轮询（约半分钟）额外做一次
-**健康检查**（`bootstrap.js` 的 `health` 方法）：用一个必然不存在的 rpcid `AAAAA` 发最小请求 ——
-会话活着回 200 + 一条错误帧；cookie 死了回 401，或 fetch 跟随重定向落到 `accounts.google.com`
-（`response.redirected`）。该请求带 `__gtaskNoSniff` 标记，不会混进抓包记录；上一轮结果异常时
-改为每轮都复查。
+After the cookies expire the SPA still holds the old `WIZ_global_data`: `SNlM0e` is still
+on the page and a probe still reports "signed in", yet every RPC returns 401 or a 302 to
+the login page. So every 8th poll (roughly half a minute) the watcher additionally runs a
+**health check** (the `health` method in `bootstrap.js`): a minimal request with an rpcid
+that cannot exist (`AAAAA`). A live session returns 200 plus one error frame; dead cookies
+return 401, or `fetch` follows a redirect and lands on `accounts.google.com`
+(`response.redirected`). The request carries a `__gtaskNoSniff` marker so it never pollutes
+the capture log; if the previous round was abnormal, the check runs every round instead.
 
-判定为 `unauthorized` / `redirected` 之后：
+Once the verdict is `unauthorized` / `redirected`:
 
-- 主界面横幅提示「会话已失效，请重新登录」，附「打开登录窗口」按钮
-- 工作台 `登录` 徽标变成 `是（会话失效）`
-- `main.go` 弹出会话窗口并重载一次（限速 3 分钟一次），把后续交给 Google 自己的登录流程
-- 登录完成或会话恢复后窗口自动隐藏
+- the main window shows a "session expired, please sign in again" banner with an
+  "Open sign-in window" button
+- the workbench `Login` badge becomes `yes (session dead)`
+- `main.go` pops the session window and reloads it once (rate limited to once per
+  3 minutes), then hands over to Google's own login flow
+- the window hides itself again once login completes or the session recovers
 
-`__Secure-1PSIDTS` 这类 cookie 轮换由网页自己的 JS 完成（会话窗口加载的是真实
-tasks.google.com），本项目不做轮换；轮换失败最终表现为 401 / 重定向，同样被健康检查兜住。
+Rotation of cookies such as `__Secure-1PSIDTS` is done by the page's own JavaScript (the
+session window loads the real tasks.google.com); this project does not rotate anything.
+A failed rotation eventually surfaces as 401 / redirect, which the health check catches
+all the same.
 
-## 读取层：一次 RPC 拿回整份数据
+## Read layer: one RPC returns everything
 
-网页版切换清单、点「已加星标」、展开「已完成」时**都不会再发请求**——所有视图都由首屏
-那一次数据在本地渲染。所以读取层只需要一个 rpcid：
+Switching lists, clicking "Starred", expanding "Completed" — the web app issues **no
+further requests** for any of it; every view is rendered locally from the single
+first-paint payload. So the read layer needs exactly one rpcid:
 
 | | |
 | --- | --- |
-| rpcid | `Yz8iP`（页面 `window.AF_dataServiceRequests["ds:0"].id`） |
-| 端点 | `/_/TasksWebEmbedUi/data/batchexecute`（页面在 `WIZ_global_data.Im6cmf` 里公布） |
-| 参数 | 空数组 |
-| 返回 | 全部清单 + 未完成任务（含服务端声明的显示顺序）+ 每个清单前 10 条已完成任务 + 星标位 + 清单顺序 |
+| rpcid | `Yz8iP` (the page's `window.AF_dataServiceRequests["ds:0"].id`) |
+| endpoint | `/_/TasksWebEmbedUi/data/batchexecute` (published by the page in `WIZ_global_data.Im6cmf`) |
+| args | empty array |
+| returns | every list + open tasks (including the server-declared display order) + the first 10 completed tasks per list + star flags + list order |
 
-响应是**位置数组**而不是带键的对象，Google 也不公布任何 schema，所以
-`internal/tasks/model.go` 里的槽位映射是靠「活响应 ↔ 渲染后的 DOM」逐位比对定下来的：
+The response is an array of **positional slots**, not keyed objects, and Google publishes
+no schema, so the slot map in `internal/tasks/model.go` was established by comparing live
+responses against the rendered DOM slot by slot:
 
-- 任务 `inner[1][13]` 是星标布尔、`inner[1][14]` 是加星时间 —— 官方 API 完全没有的字段
-- 清单 `d[2][0]` 是服务端声明的未完成任务显示顺序，**它是唯一可信的排序依据**
-  （任务自带的 `inner[7]` 排序键并不单调）
-- 清单 `d[9]` 是真实已完成总数，比快照实际带回的多（每清单只回前 10 条），
-  正好是网页「已完成 (44)」那个数字
-- 已完成任务按 `completedAt` 倒序渲染，与网页一致
+- For a task, `inner[1][13]` is the starred boolean and `inner[1][14]` the starred
+  timestamp — fields the official API does not have at all
+- For a list, `d[2][0]` is the server-declared display order of open tasks, and **it is
+  the only trustworthy sort key** (the task's own `inner[7]` sort key is not monotonic)
+- For a list, `d[9]` is the real completed count, larger than what the snapshot actually
+  carries (only the first 10 per list) — exactly the number in the web app's
+  "Completed (44)"
+- Completed tasks are rendered by `completedAt` descending, matching the web app
 
-还没定下含义的槽位不会被丢掉，而是原样收进 `SlotBag`（`Extra` / `DetailExtra` /
-`MetaExtra`）随 `/api/tasks` 一起返回：Google 改结构时会先在这里冒出来，
-而不是表现为「某个字段悄悄没了」。`internal/tasks/model_test.go` 用一份合成快照
-把每个槽位钉死（不含任何真实任务内容）。
+Slots whose meaning is still unknown are not discarded: they are collected verbatim into
+`SlotBag` (`Extra` / `DetailExtra` / `MetaExtra`) and returned along with `/api/tasks`.
+When Google changes the structure it shows up there first, instead of manifesting as "some
+field quietly disappeared". `internal/tasks/model_test.go` pins every slot down with a
+synthetic snapshot (containing no real task content).
 
-主界面因此只有一个数据接口：`GET /api/tasks`。
+The main window therefore has exactly one data endpoint: `GET /api/tasks`.
 
-## 写入层：一条双向同步通道 `SOV0tb`
+## Write layer: a single bidirectional sync channel, `SOV0tb`
 
-原以为每个动作（加星、改标题、删除……）各有自己的 rpcid，抓包后发现**不是**：网页端所有
-写入都走同一条同步流 `SOV0tb`。请求里带的是**字段级 patch 事件**，响应里回带服务端自己的
-变更和一个新的同步时间戳。所以写入层不是「找到 N 个 rpcid」，而是「学会合成这一种报文」——
-`internal/tasks/sync.go` 就是这门协议的实现。
+The assumption was that each action (star, retitle, delete…) had its own rpcid. Capturing
+traffic proved otherwise: **every** write in the web app goes through the same sync stream
+`SOV0tb`. The request carries **field-level patch events**; the response carries the
+server's own mutations plus a new sync timestamp. So the write layer is not "find N
+rpcids" but "learn to synthesise this one message" — `internal/tasks/sync.go` is the
+implementation of that protocol.
 
-### 报文形状
+### Message shape
 
-请求的 args（单元素数组）：
+The request args (a single-element array):
 
 ```json
-[[null, 同步状态], null, [null, ["账户 id"]], null,
- ["随机 16 位", [null, 4, "boq_...", "prod-00-us", 3, 1, 2, null, 1]], []]
+[[null, syncState], null, [null, ["account id"]], null,
+ ["random 16 chars", [null, 4, "boq_...", "prod-00-us", 3, 1, 2, null, 1]], []]
 ```
 
-- **轮询**：`同步状态 = [[秒, 纳秒]]`，意思是「给我这个时间点之后的变更」
-- **写入**：`同步状态 = [[秒, 纳秒], null, 事件组]`，`事件组 = [[[事件, ...], []]]`
-- **响应**：`[实体变更, null, [[新的秒, 新的纳秒]]]`；args 发空数组会被拒（错误码 13）
+- **Polling**: `syncState = [[sec, nsec]]`, meaning "give me everything after this point"
+- **Writing**: `syncState = [[sec, nsec], null, eventGroup]`,
+  `eventGroup = [[[event, ...], []]]`
+- **Response**: `[entityMutations, null, [[newSec, newNsec]]]`; sending empty args is
+  rejected (error code 13)
 
-**时间戳必须链式沿用**：下一次请求要带的是上一次响应尾部那个新值。带陈旧时间戳会偶发
-错误码 3；而页面自己也在按定时器轮询同一条通道，随时会把服务端时间推走。所以写入层每次
-提交前先空轮询一次拿最新值，真收到错误码 3 就再轮询一次并重试（`SyncWriter.commit`）。
+**Timestamps must be chained**: the next request has to carry the new value from the tail
+of the previous response. A stale timestamp intermittently yields error code 3, and the
+page itself polls the same channel on a timer, pushing the server time forward at any
+moment. So the write layer does an empty poll before every commit to fetch the latest
+value, and on error code 3 it polls again and retries (`SyncWriter.commit`).
 
-### 事件结构
+### Event structure
 
-一个事件是 28 个槽位的数组，有意义的只有这些：
+An event is an array of 28 slots; only these carry meaning:
 
-| 槽 | 含义 |
+| Slot | Meaning |
 | --- | --- |
-| 0 | 客户端生成的事件 id（16 位 base64url） |
-| 1 | 实体类型：`2` 账户级清单顺序（单例，无 id）、`3` 任务、`4` 清单 |
-| 2 | 实体 id |
-| 3 | 路径，单事件写入是 `[1]`，新建任务用 `[1]`/`[1,1]`/`[1,2]` |
-| 5 / 6 / 7 | patch，分别对应实体类型 2 / 3 / 4 |
-| 8 | 清单内插入位置：`[任务 id, null, null, null, null, null, 1]` |
-| 9 | 客户端时间戳 `[秒, 纳秒]` |
-| 10 | `[null, 清单 id]`，任务归属 |
-| 11 | `[[], []]`，顺序占位 |
-| 25 | 固定 `1` |
-| 26 | 组内序号（多事件时 1、2、3……） |
-| 27 | 尾部，服务端不校验 |
+| 0 | Client-generated event id (16 chars, base64url) |
+| 1 | Entity type: `2` account-level list order (singleton, no id), `3` task, `4` list |
+| 2 | Entity id |
+| 3 | Path; `[1]` for a single-event write, `[1]`/`[1,1]`/`[1,2]` when creating a task |
+| 5 / 6 / 7 | Patch, for entity types 2 / 3 / 4 respectively |
+| 8 | Insert position inside a list: `[taskId, null, null, null, null, null, 1]` |
+| 9 | Client timestamp `[sec, nsec]` |
+| 10 | `[null, listId]`, the task's parent list |
+| 11 | `[[], []]`, order placeholder |
+| 25 | Constant `1` |
+| 26 | Sequence number within the group (1, 2, 3… for multi-event writes) |
+| 27 | Tail, not validated by the server |
 
-### patch 与字段号
+### Patches and field numbers
 
 ```json
-[[null, [字段号...]], 值数组]
+[[null, [fieldNumber...]], valueArray]
 ```
 
-值数组是**稠密**的，下标 = 字段号 − 1，尾部空槽被裁掉。所以「改标题」是
-`[[null,[2]],[null,"新标题"]]`；而**清除一个字段就是发空值数组**——取消星标、取消完成、
-清除截止日期都是这么写的。
+The value array is **dense**: index = field number − 1, trailing empty slots trimmed. So
+"retitle" is `[[null,[2]],[null,"new title"]]`, and **clearing a field means sending an
+empty value array** — that is how un-starring, un-completing and clearing a due date are
+written.
 
-任务 detail 的字段号（读取侧同一个编号：detail 数组下标 = 字段号 − 1）：
+Field numbers for a task's detail (the read side uses the same numbering: detail array
+index = field number − 1):
 
-| 字段 | 含义 | 写法 |
+| Field | Meaning | How to write it |
 | --- | --- | --- |
-| 1 | 完成 | `1`，与字段 5 一起写 |
-| 2 | 标题 | 字符串 |
-| 3 | 备注 | 字符串，可含换行 |
-| 5 | 完成时间 | `[秒, 纳秒]` |
-| 6 | 已删除 | `1` 删除、空数组恢复。服务端自动把任务从清单顺序里摘掉并写入删除时间（detail 下标 12） |
-| 14 | 星标 | `1`，与字段 15 一起写 |
-| 15 | 星标时间 | `[秒, 纳秒]` |
-| 18 | 截止日期 | 消息体 `[[秒, 纳秒]]`，比普通时间戳多包一层 |
+| 1 | Completed | `1`, written together with field 5 |
+| 2 | Title | string |
+| 3 | Notes | string, may contain newlines |
+| 5 | Completed at | `[sec, nsec]` |
+| 6 | Deleted | `1` to delete, empty array to restore. The server removes the task from the list order by itself and records the deletion time (detail index 12) |
+| 14 | Starred | `1`, written together with field 15 |
+| 15 | Starred at | `[sec, nsec]` |
+| 18 | Due date | payload `[[sec, nsec]]`, wrapped one level deeper than a plain timestamp |
 
-清单：字段 `1` 标题、`3` kind（服务端自己填 `user`）、`5` 排序。账户级顺序单例：字段 `3`
-是逗号分隔的清单 csv，**服务端校验它必须恰好包含全部未删除清单**，所以新建清单前要重新读
-一次快照拿当前顺序，不能用缓存。
+Lists: field `1` title, `3` kind (the server fills in `user` itself), `5` sort order. The
+account-level order singleton: field `3` is a comma-separated list csv, and **the server
+validates that it contains exactly all non-deleted lists**, so creating a list requires
+re-reading the snapshot for the current order — a cached one will not do.
 
-截止时间的时区约定：只给日期时存 **UTC 零点**（Google 的整天约定，任何时区看到的都是同一
-天）；给了时分就按本机时区换算成真实时刻，Google 网页 / 手机端显示的才是用户选的钟点。
-读取侧按同一规则还原：UTC 零点 → 只有日期，其它 → 本机日期 + 时分。
+Timezone convention for due times: a date-only value is stored as **UTC midnight**
+(Google's whole-day convention, so every timezone sees the same day); when a time of day
+is supplied it is converted from local time to a real instant, which is what makes the
+Google web / mobile clients show the clock time the user picked. The read side restores
+the same rule: UTC midnight → date only, anything else → local date + time.
 
-### 组合出来的操作
+### Operations built out of this
 
-| 操作 | 事件 |
+| Operation | Events |
 | --- | --- |
-| 新建任务 | 4 个：建实体（带标题）→ 顺序占位（槽 11）→ 插入清单（类型 4 + 槽 8）→ 绑定清单（槽 10）。任务 id 由客户端生成，服务端照用 |
-| 改标题 / 改备注 / 星标 / 完成 / 截止 / 删除 / 恢复 | 1 个任务 patch 事件 |
-| 新建清单 | 2 个：建清单（类型 4，字段 1）+ 重写顺序 csv（类型 2，字段 3） |
-| 重命名清单 | 1 个清单 patch 事件 |
+| Create task | 4: create entity (with title) → order placeholder (slot 11) → insert into list (type 4 + slot 8) → bind list (slot 10). The task id is generated client-side and the server adopts it |
+| Retitle / edit notes / star / complete / due / delete / restore | 1 task patch event |
+| Create list | 2: create list (type 4, field 1) + rewrite the order csv (type 2, field 3) |
+| Rename list | 1 list patch event |
 
-这些报文由 Go 现算，**不走 `operations.json` 的模板**——模板表达不了链式时间戳和客户端
-生成的 id。`tasks.Service.Execute` 把它们分派给 `SyncWriter`，工作台里显示成
-`SOV0tb（同步通道）`；前端契约没变，还是 `POST /api/ops/execute {op, params}`。
-`internal/tasks/sync_test.go` 用假客户端把每种报文的确切 JSON 钉死，包括时间戳链式传递与
-错误码 3 的重试。
+These messages are computed by Go on the fly and **do not go through the
+`operations.json` templates** — templates cannot express chained timestamps or
+client-generated ids. `tasks.Service.Execute` dispatches them to `SyncWriter`, and the
+workbench shows them as `SOV0tb (sync channel)`. The frontend contract is unchanged:
+still `POST /api/ops/execute {op, params}`. `internal/tasks/sync_test.go` pins the exact
+JSON of every message with a fake client, including timestamp chaining and the error-3
+retry.
 
-**还没破解**：删除清单（字段 2 置 true → 错误码 13 INTERNAL，估计不是字段级 patch）、任务
-排序与跨清单移动（只写槽 10 不够，槽 8 的操作码 0/2/3/4 都无效）、子任务、重复规则（字段 8
-能写进去但不生效）。
+**Still unsolved**: deleting a list (setting field 2 to true → error 13 INTERNAL, probably
+not a field-level patch), reordering tasks and moving them across lists (writing slot 10
+alone is not enough; opcodes 0/2/3/4 in slot 8 all fail), subtasks, recurrence rules
+(field 8 accepts a write but has no effect).
 
-## 操作映射：把抓包变成能力
+## Operation mapping: turning captures into capabilities
 
-rpcid 和参数结构没有文档，只能从活的网页上抓。抓到之后要能复用，所以有一层
-**操作注册表**（`internal/tasks/operations.json`）：23 个逻辑操作，每个对应一到多个
-batchexecute 调用，参数是 `text/template` 模板。目前 `snapshot` 走模板，12 个写入操作走
-上一节的同步通道（注册表里只留说明，不带 steps），其余的还在等抓包：
+rpcids and argument structures are undocumented and can only be captured from the live web
+app. To make a capture reusable there is an **operation registry**
+(`internal/tasks/operations.json`): 23 logical operations, each mapping to one or more
+batchexecute calls with `text/template` arguments. Today `snapshot` goes through a
+template, 12 write operations go through the sync channel described above (the registry
+only keeps their description, no steps), and the rest are still waiting on captures:
 
 ```json
 { "op": "setStarred",
   "steps": [{ "rpcid": "AbCdE", "args": "[null,{{json .TaskID}},[{{json .Starred}}]]" }] }
 ```
 
-`tasks.Service.Execute(ctx, "snapshot", params)` 渲染模板 → 组批 → 走页面发出 → 解码响应。
-主界面的每个按钮就是调一个 op，所以**打通一条通道，界面上就多亮一批功能**。
+`tasks.Service.Execute(ctx, "snapshot", params)` renders the template → batches → sends
+through the page → decodes the response. Every button in the main window calls one op, so
+**each channel that gets unlocked lights up another batch of features in the UI**.
 
-注册表落盘在用户配置目录，抓包记录也持久化成 JSONL：
+The registry is persisted in the user config directory, and captures are persisted as
+JSONL:
 
-| 平台 | 目录 |
+| Platform | Directory |
 | --- | --- |
 | macOS | `~/Library/Application Support/gtasks/` |
 | Linux | `~/.config/gtasks/` |
 | Windows | `%AppData%\gtasks\` |
 
-里面是 `operations.json`（操作映射）和 `captures.jsonl`（抓包历史，只追加）。
+Inside: `operations.json` (the operation map) and `captures.jsonl` (append-only capture
+history).
 
-## 桌面化改造：会话页里的注入层
+## Desktop adaptations: the injected layer in the session page
 
-会话窗口就是每天真正在用的 tasks.google.com，`internal/bridge/bootstrap.js` 的 UI 层
-在它上面做了几处贴合桌面端的改动（只动 DOM 与回调 Go，不替换 Google 自己的逻辑）：
+The session window is the real tasks.google.com you use every day. The UI layer of
+`internal/bridge/bootstrap.js` makes a few desktop-friendly changes on top of it (DOM and
+callbacks into Go only — Google's own logic is never replaced):
 
-- **顶栏去掉「Google 应用」九宫格**（纯 CSS 隐藏）。
-- **顶栏主题 / 语言按钮**：绝对定位在「?」左边的空档里（顺序：主题 / 语言 / ?，
-  与主窗口侧栏一致），点击弹 Go 的原生单选菜单。这里有个坑：Google 顶栏右段
-  （`.gb_Pe`）是 `overflow: hidden` 的裁剪盒，只有 96px 宽，注入的按钮画到盒子外面
-  就直接不显示；左边的 `.gb_fe` 是 `flex: 1` 的空档，所以把裁剪盒加宽 44px、再把「?」
-  右移让出位置，头像与 Google 自己的排版都不动。首屏 Google 会重排顶栏，按钮位置
-  按几个时间点校正，窗口 resize 也重摆。
-- **主题**三档（明亮 / 暗黑 / 跟随系统）由 Go 持久化（`<数据目录>/theme.txt`），macOS
-  上同时切 `NSApp.appearance` 和每个窗口的 `appearance`，标题栏与 Google 页面的
-  `prefers-color-scheme` 一起变。Google 的配色全靠媒体查询驱动，外观一变立刻重算，
-  所以切主题**不再重载会话页**；只有页面回报媒体查询没跟上时（个别 WebView 版本）
-  才兜底重载一次。
-- **「支持」菜单里的「帮助」改造成「GTasks 工作台」**：沿用 Google 自己的菜单项
-  （行高、悬停高亮、键盘导航都一致），挪到菜单末尾；桌面客户端里帮助页没有意义，
-  正好腾出这一项。点击打开逆向工作台窗口。
-- **启动遮罩**：会话页从导航到 Google 首屏渲染完之间有 1~3 秒空档，bootstrap 在
-  document-start 就盖一层与当前主题同色的遮罩 + 转圈（`#gtasks-splash`），外壳渲染
-  出来即淡出；遮罩不吃鼠标事件、带 8 秒硬超时。三个窗口的 `BackgroundColour` 与
-  webview 的 `underPageBackgroundColor` 也按主题预设，深色模式下不再闪白屏。
-- **侧栏每个任务列表行加「⋮」**：悬停时出现，点的还是 Google 自己的「列表选项」菜单
-  （排序 / 重命名 / 删除 / 移动……）；该清单没在内容区渲染时会先切过去再点。
-- **右键换成原生自定义菜单**：返回 / 重新加载 / 剪切 / 复制 / 粘贴 / 全选 / 检查元素，
-  去掉了 WebKit 默认菜单里的「前进」。主界面与工作台走 Wails 运行时的
-  `--custom-contextmenu` CSS 变量，会话页由 bootstrap 拦截 `contextmenu` 后回调 Go。
+- **The "Google apps" waffle is removed from the top bar** (hidden with pure CSS).
+- **Theme / language buttons in the top bar**: absolutely positioned into the gap left of
+  the "?" (order: theme / language / ?, matching the main window's sidebar); clicking
+  opens Go's native radio menu. There is a trap here: the right segment of Google's top
+  bar (`.gb_Pe`) is an `overflow: hidden` clipping box only 96px wide, so injected
+  buttons drawn outside it simply do not show; the `.gb_fe` on the left is a `flex: 1` gap.
+  The fix widens the clipping box by 44px and nudges the "?" right to make room, leaving
+  the avatar and Google's own layout untouched. Google re-lays out the top bar during
+  first paint, so button positions are corrected at a few time points and re-arranged on
+  window resize.
+- **Theme** has three settings (light / dark / follow system), persisted by Go
+  (`<data dir>/theme.txt`). On macOS it switches both `NSApp.appearance` and each window's
+  `appearance`, so the title bar and the Google page's `prefers-color-scheme` change
+  together. Google's colours are entirely media-query driven and recompute the moment the
+  appearance changes, so switching theme **no longer reloads the session page**; a reload
+  is only used as a fallback when the page reports that its media queries did not follow
+  (certain WebView versions).
+- **"Help" in the "Support" menu is repurposed into "GTasks Workbench"**: it reuses
+  Google's own menu item (row height, hover highlight and keyboard navigation all stay
+  consistent) and moves it to the end of the menu. A help page is meaningless in a desktop
+  client, which frees the slot. Clicking it opens the reverse-engineering workbench.
+- **Startup splash**: there is a 1–3 second gap between navigation and Google's first
+  paint. At document-start the bootstrap covers the page with a splash in the current
+  theme colour plus a spinner (`#gtasks-splash`) and fades it out as soon as the shell
+  renders; the splash ignores mouse events and has an 8 second hard timeout. All three
+  windows' `BackgroundColour` and the webview's `underPageBackgroundColor` are also
+  pre-set from the theme, so dark mode no longer flashes white.
+- **A "⋮" on every list row in the sidebar**: appears on hover and still clicks Google's
+  own "List options" menu (sort / rename / delete / move…); if that list is not currently
+  rendered in the content area it is selected first, then clicked.
+- **The context menu is a native custom one**: back / reload / cut / copy / paste / select
+  all / inspect element — "Forward" from WebKit's default menu is gone. The main window and
+  the workbench use the Wails runtime's `--custom-contextmenu` CSS variables; the session
+  page intercepts `contextmenu` in the bootstrap and calls back into Go.
 
-应用图标取自 Google Tasks 官方产品标识（gstatic 的 `tasks_2026` SVG，仅自用）：
-`build/macos-icon.sh` 用无头 Chrome 栅格化成 iconset 再 `iconutil` 打包，
-`build/macos-bundle.sh` 组装 `GTasks.app`（Info.plist + icns + 主程序）。
-**`CFBundleIdentifier` 固定为 `gtasks`**：WebKit 的 cookie / localStorage 按它隔离，改了要重新登录。
+The app icon is Google Tasks' own product mark (the `tasks_2026` SVG on gstatic, personal
+use only): `build/macos-icon.sh` rasterises it with headless Chrome into an iconset and
+packs it with `iconutil`; `build/macos-bundle.sh` assembles `GTasks.app`
+(Info.plist + icns + binary). **`CFBundleIdentifier` is pinned to `gtasks`**: WebKit
+isolates cookies / localStorage by that value, so changing it forces a re-login.
 
-## 构建与运行
+## Build & run
 
-仓库：<https://github.com/mose-x/googleTasks.git>（只做 git 分发，不提供安装包）
+Repository: <https://github.com/mose-x/GTasks.git>
 
 ```bash
-git clone https://github.com/mose-x/googleTasks.git
-cd googleTasks
-go mod tidy          # 国内网络可加 GOPROXY=https://goproxy.cn,direct
-go run .             # 或 go build -o gtasks . && ./gtasks
-
-# macOS 想要带图标的 .app：
-./build/macos-bundle.sh /tmp/GTasks.app
-./build/macos-icon.sh          # 仅在改 build/icon.svg 后需要，依赖本机 Chrome
+git clone https://github.com/mose-x/GTasks.git
+cd GTasks
+make build && ./gtasks      # or: go run .
+make app                    # macOS: assemble /tmp/GTasks.app with its icon
+make help                   # every target
 ```
 
-需要 **Go 1.26+**（Wails v3.1.0 的要求；装的是 1.25 时 toolchain 会自动下载 1.26）。
+Requires **Go 1.26+** (a Wails v3.1.0 requirement; if only 1.25 is installed the toolchain
+downloads 1.26 automatically). The `Makefile` defaults `GOPROXY` to
+`https://goproxy.cn,direct`; override it if you prefer. The app icon is committed at
+`build/macos/GTasks.icns`; run `make icon` only after changing `build/icon.svg` (it
+rasterises with headless Chrome, so a local Chrome is required).
 
-| 目标 | 命令 | 依赖 |
+| Target | Command | Dependencies |
 | --- | --- | --- |
-| macOS | `go build -o gtasks .` | Xcode Command Line Tools（cgo） |
-| Windows | `GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o gtasks.exe .` | 可从 macOS/Linux 交叉编译；运行时需要 WebView2 Runtime（Win10/11 一般已内置） |
-| Linux | `go build -o gtasks .` | `sudo apt install libgtk-3-dev libwebkit2gtk-4.1-dev`（Arch：`gtk3 webkit2gtk-4.1`） |
-| Linux 无 cgo | `CGO_ENABLED=0 go build -tags purego -o gtasks .` | 只需运行时库 `libgtk-3-0 libwebkit2gtk-4.1-0` |
+| macOS | `make build` | Xcode Command Line Tools (cgo) |
+| Windows | `GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o gtasks.exe .` | Cross-compiles from macOS / Linux; needs the WebView2 Runtime at run time (usually preinstalled on Win10/11) |
+| Linux | `CGO_ENABLED=0 go build -tags purego -o gtasks .` | Runtime libraries only: `libgtk-3-0 libwebkit2gtk-4.1-0` (Arch: `gtk3 webkit2gtk-4.1`) |
 
-三个目标都已通过 `go build` 验证（Windows amd64/arm64、Linux amd64 purego、macOS arm64）；
-Windows 与 Linux 的**实机冒烟测试还没做**。
+All six targets (Windows amd64/arm64, Linux amd64/arm64 purego, macOS amd64/arm64) are
+verified with `go build`; **on-device smoke tests for Windows and Linux are still
+outstanding**.
 
-启动后有两个窗口：**Google Tasks**（主界面）与
-**Google 会话**（加载 `tasks.google.com`，未登录会自动跳到 Google 登录页）。
-**逆向工作台**默认不弹，需要时从会话页顶栏「?」菜单里的「GTasks 工作台」打开
-（关掉后再点会按需重建）。
+### Release artifacts
 
-主题三档（明亮 / 暗黑 / 跟随系统）由 Go 统一持有，主界面侧栏和会话页顶栏各有一个按钮，
-任一处切换全端同步；深色沿用 Google 网页版暗色规范（底 `#202124`、正文 `#e8eaed`、
-强调 `#8ab4f8`），并设置 `color-scheme: dark` 让原生控件（日期选择、下拉、滚动条）一起变暗。
-切换是即时的：原生外观一变，各窗口的 CSS 变量与 Google 页面的媒体查询同时重算，不重载页面。
-主窗口首帧之前由 `index.html` 里的内联脚本按 localStorage 缓存先上色，避免深色模式闪白。
-工作台是逆向工具，固定深色不跟主题走。
-抓包历史在重启后会自动读回工作台（只保留最近 3000 条，界面只显示最新 400 行）。
-其中「内部同步调用」（侧栏列表选项为未勾选清单做临时显隐时产生的 show/hide RPC）会折叠成
-一行分组，点开才展开每条原始记录——它们是桌面化改造的副作用，不是逆向时关心的操作。
+`make package` (current platform) or `make dist` (three platforms × amd64/arm64) writes to
+`build/bin/`, with names following `gtasks-<version>-<platform>-<arch>.<ext>` (Go's
+`amd64` becomes `x64` in asset names):
 
-界面文案走 `internal/i18n/locales/*.toml`（`go:embed` 打包），目前内置简体中文与 English：
-主界面侧栏、会话页顶栏、工作台顶栏各有一颗语言按钮（主题按钮后面），弹 Go 的原生单选菜单，
-当前语言持久化在 `<数据目录>/lang.txt`，切换后三个窗口与原生右键菜单一起换。词表是扁平键值，
-键名与代码里 `t("键", "中文兜底")` 的兜底字面量一一对应，缺键回落到中文，界面不会开天窗；
-**加一门语言只需要丢一个 `jp.toml` 进去重新打包**，菜单里自动多出一项，代码零改动
-（`meta.label` 是菜单里显示的名字，用该语言自己写）。内嵌的 Google 页面也跟着换：
-会话页地址带 `hl=` 界面语言参数（`zh`→`zh-CN`、`jp`→`ja`，其余原样传），切语言时会
-话页原地 `location.replace` 重载一次，Google 自家文案跟应用语言保持一致。
+| Platform | Artifacts | Script |
+| --- | --- | --- |
+| macOS | `.dmg` | `scripts/build-macos.sh` |
+| Windows | `.exe` | `scripts/build-windows.sh` |
+| Linux | bare binary + `.tar.gz` (plus `.deb` / `.rpm` when fpm is installed) | `scripts/build-linux.sh` |
 
-这次重载是整页的，桥接要跟着停几秒，所以 `langNavigator`（`main.go`）把它压到最少：
-语言没变不载；会话窗藏着（登录后的常态）就先把这笔账欠着，等它真露出面再补，主窗口
-只换词表、全程无感；只有用户正盯着会话页时才当场载，白屏由 bootstrap 的启动遮罩盖住。
-重载期间 `watcher` 进入安静期（页面 announce 就绪后收短到刚好盖过下一轮轮询），不会因为
-ready 抖动把会话窗弹到脸上。同一时间 `/api/tasks` 若撞上桥接不可用，会垫回上一次成功的
-快照并打上 `stale` 标记，主界面不闪空列表、不甩红横幅，桥接回来后前端静默补一次。
-界面重渲染（`renderAll`）会保留三个滚动区的位置与焦点，切语言不再像「界面被重置一遍」。
-以上行为由 `scripts/verify-lang-switch.py` 做端到端回归（见「测试」一节）。
+The version is stamped both into the binary (`./gtasks --version`) and into the macOS
+`Info.plist`. Pushing a `v*` tag makes `.github/workflows/build.yml` build every target
+and publish a Release with `sha256sums.txt`; tags carrying an `-rc` / `-beta` suffix are
+published as pre-releases. Pushing a branch or PR runs
+`.github/workflows/ci.yml` (gofmt + vet + tests on all three platforms). Details in
+`scripts/README.md`.
 
-`session.Watcher` 每 4 秒探测一次会话页面：登录后自动隐藏会话窗口，掉线后自动弹回来；
-桥接一就绪就自动打开抓包。两个行为都能在工作台顶栏关掉。
+macOS artifacts are **not code-signed**: under strict MDM an ad-hoc signature is rejected
+by amfid with `-423`, which is worse than no signature at all, so packaging strips the
+ad-hoc signature the Go linker applies and stamps the DMG with `com.apple.quarantine` —
+first launch then goes through the Gatekeeper "right-click → Open" bypass. **Do not run
+`xattr -cr`**: clearing the quarantine attribute routes the launch through the provenance
+path, which SIGKILLs unsigned binaries (exit 137). If an install still refuses to launch,
+run `./scripts/run-first-installed-local-mac.sh` once.
 
-测试：
+Two windows appear on launch: **Google Tasks** (the main UI) and **Google Session**
+(loads `tasks.google.com`; it redirects to Google's login page when signed out). The
+**workbench** does not pop up by default — open it from "GTasks Workbench" in the "?" menu
+of the session page's top bar (it is rebuilt on demand after being closed).
+
+Theme has three settings (light / dark / follow system) owned by Go, with a button in the
+main window's sidebar and one in the session page's top bar; switching in either place
+syncs everywhere. Dark mode follows Google's own web dark palette (background `#202124`,
+body text `#e8eaed`, accent `#8ab4f8`) and sets `color-scheme: dark` so native controls
+(date picker, dropdowns, scrollbars) darken too. Switching is instant: the native
+appearance changes, then every window's CSS variables and the Google page's media queries
+recompute — no page reload. Before the main window's first frame, an inline script in
+`index.html` applies the cached localStorage colours so dark mode does not flash white.
+The workbench is a reverse-engineering tool and stays dark regardless of theme.
+
+Capture history is reloaded into the workbench after a restart (the last 3000 entries are
+kept, the UI shows the newest 400 rows). Entries classified as "internal sync calls"
+(the show/hide RPCs produced when the sidebar's list options temporarily show or hide an
+unselected list) collapse into a single group row that expands on click — they are a side
+effect of the desktop adaptations, not something you care about while reverse-engineering.
+
+UI copy lives in `internal/i18n/locales/*.toml` (embedded with `go:embed`), currently
+Simplified Chinese and English: the main window sidebar, the session page top bar and the
+workbench top bar each have a language button (after the theme button) that opens Go's
+native radio menu. The current language is persisted at `<data dir>/lang.txt`, and
+switching updates all three windows plus the native context menu. The catalogues are flat
+key/value files whose keys map one-to-one onto the fallback literals in the code's
+`t("key", "中文兜底")` calls; a missing key falls back to Chinese, so the UI never shows a
+hole. **Adding a language means dropping in a `jp.toml` and rebuilding** — the menu gains
+an entry with zero code changes (`meta.label` is the name shown in the menu, written in
+that language). The embedded Google page follows along: the session URL carries an `hl=`
+UI-language parameter (`zh`→`zh-CN`, `jp`→`ja`, everything else passed through), and
+switching language does one in-place `location.replace` reload so Google's own copy
+matches the app language.
+
+That reload is a full page load and the bridge has to pause for a few seconds, so
+`langNavigator` (`main.go`) keeps it to a minimum: no reload when the language is
+unchanged; when the session window is hidden (the normal state after login) the reload is
+deferred and settled once the window actually surfaces, so the main window only swaps its
+catalogue and the user feels nothing; only when the user is looking at the session page is
+it reloaded on the spot, with the white flash covered by the bootstrap splash. While the
+reload runs the `watcher` enters a quiet period (shortened to just cover the next poll
+once the page announces ready) so that ready-state jitter cannot throw the session window
+in your face. Over the same window, if `/api/tasks` hits an unavailable bridge it returns
+the last successful snapshot flagged `stale`, so the main window neither flashes an empty
+list nor raises a red banner, and the frontend quietly refreshes once the bridge is back.
+Re-rendering (`renderAll`) preserves the scroll positions and focus of all three scroll
+areas, so switching language no longer feels like "the UI was reset". All of this is
+covered end to end by `scripts/verify-lang-switch.py` (see Testing).
+
+`session.Watcher` probes the session page every 4 seconds: it hides the session window
+after login and brings it back when the session dies; sniffing is started automatically as
+soon as the bridge is ready. Both behaviours can be turned off in the workbench top bar.
+
+Testing:
 
 ```bash
-go test ./...
+go test ./...        # or: make check (gofmt + vet + test)
 ```
 
-- `internal/bridge` 用 Node 把 `bootstrap.js` 跑在伪造的 tasks.google.com 页面里，
-  实测验证：`wails:runtime:ready` 确实发出、`at`/`bl`/`loggedIn` 正确读到、发出的请求
-  URL 含 `rpcids`/`bl`/`rt=c`/`source-path`/`_reqid`、头里有 `X-Same-Domain: 1`、
-  `credentials: include`、`f.req` 双重编码结构正确。没有 `node` 时自动跳过。
-- `internal/batchexec` 覆盖 `f.req` 编码与 `)]}'` / 分块响应解码。
-- `internal/tasks` 覆盖注册表落盘重载、模板参数替换、未配置操作的报错。
-- `internal/api` 覆盖抓包 → Go 代码生成（含 `go/format` 校验过的片段）。
+- `internal/bridge` runs `bootstrap.js` in Node against a faked tasks.google.com page and
+  asserts for real: `wails:runtime:ready` is sent, `at`/`bl`/`loggedIn` are read
+  correctly, outgoing request URLs contain
+  `rpcids`/`bl`/`rt=c`/`source-path`/`_reqid`, headers include `X-Same-Domain: 1` and
+  `credentials: include`, and the double-encoded `f.req` structure is right. Skipped
+  automatically when `node` is absent.
+- `internal/batchexec` covers `f.req` encoding plus `)]}'` / chunked response decoding.
+- `internal/tasks` covers registry persistence and reload, template parameter
+  substitution, and errors for unconfigured operations.
+- `internal/api` covers capture → Go code generation (including `go/format` validation of
+  the emitted snippet).
 
-改语言 / 主题相关的代码，另外跑一遍端到端回归（应用要在运行、已登录 Google）：
+After touching language- or theme-related code, also run the end-to-end regression (the app
+must be running and signed in to Google):
 
 ```bash
-python3 scripts/verify-lang-switch.py            # 全量，约 70 秒，34 项断言
-python3 scripts/verify-lang-switch.py --quick    # 跳过浅色主题那一轮
+python3 scripts/verify-lang-switch.py            # full run, ~70 s, 34 assertions
+python3 scripts/verify-lang-switch.py --quick    # skips the light-theme round
+make verify                                      # same as the full run
 ```
 
-它走的是本地控制端口，依次验证：同语言重选不触发重载；会话窗收起时切语言只换词表
-（会话页原地不动、窗口不弹脸、主窗口数据全程新鲜）；窗口露面时欠着的那次重载自动
-补上；窗口可见时当场重载（启动遮罩底色必须与页面底色一致、主窗口靠 `/api/tasks`
-的存货不断供、没有卡住的请求），深色浅色各一轮。跑完把语言 / 主题 / 窗口状态还原，
-全过退出码 0。
+It drives the local control port and checks, in order: re-selecting the same language
+triggers no reload; switching language while the session window is hidden only swaps the
+catalogue (the session page stays put, the window is not thrown in your face, and the main
+window's data stays fresh throughout); the deferred reload is settled automatically once
+the window surfaces; switching while the window is visible reloads on the spot (the splash
+must cover the whole gap and its background must match the page background, and the main
+window keeps serving from the `/api/tasks` snapshot with no stuck requests), once in dark
+and once in light. Language, theme and window state are restored afterwards; a clean run
+exits 0.
 
-## rpcid 发现流程
+## rpcid discovery workflow
 
-1. 在**会话窗口**里正常登录 Google；工作台顶栏应显示 `登录: 是`、`at`/`bl` 有值
-2. 抓包默认已自动开启（也可手动点 **开始**）
-3. 在会话窗口里做一个操作，例如给某个任务加星
-4. 工作台「RPC 抓包」出现一条记录，展开可看 `f.req` 与响应，点 **解码响应** 看结构
-5. 点 **生成代码 / 固化为操作**：右侧给出可直接编译的 Go 片段和 steps JSON
-6. 在「固化为操作」下拉里选对应的 op（如 `setStarred`），必要时把字面量参数改成
-   `{{json .TaskID}}` 这样的模板占位符，点 **保存为操作**
-7. 切到「操作映射」页，用 **执行** 面板带上参数重放，确认语义正确
-8. 回到主界面，对应按钮就活了
+1. Sign in to Google normally in the **session window**; the workbench top bar should
+   show `Login: yes` with values for `at`/`bl`
+2. Capturing is on by default (there is also a **Start** button)
+3. Perform an action in the session window, e.g. star a task
+4. A record appears in the workbench's "RPC captures"; expand it to see `f.req` and the
+   response, then click **Decode response** to inspect the structure
+5. Click **Generate code / Freeze as operation**: the right pane shows a compilable Go
+   snippet and the steps JSON
+6. In the "Freeze as operation" dropdown pick the matching op (e.g. `setStarred`), replace
+   literals with template placeholders such as `{{json .TaskID}}` where needed, and click
+   **Save as operation**
+7. Switch to the "Operation mapping" page and replay it from the **Execute** panel with
+   parameters to confirm the semantics
+8. Back in the main window, the corresponding button is now live
 
-逐个覆盖：增 / 删 / 改标题 / 改备注 / 改日期含时分 / 加星 / 设重复 / 拖拽排序
-（同列表与跨列表）/ 加子任务 / 恢复已删除 / 清空已完成 / 列表增删改与排序 / 搜索。
+Cover them one by one: create / delete / retitle / edit notes / due date with time /
+star / recurrence / drag to reorder (within and across lists) / add subtask / restore
+deleted / clear completed / list create-delete-rename-reorder / search.
 
-**已知限制**：macOS / Linux 上 `WebviewWindowOptions.JS` 在导航结束**之后**注入，页面首屏
-那几个 RPC 可能抓不到（Windows 是 document start 注入，首屏也能抓到）。任何**用户交互
-触发**的调用三平台都能抓到，这已覆盖发现 rpcid 的全部需求。
+**Known limitation**: on macOS / Linux `WebviewWindowOptions.JS` is injected **after**
+navigation finishes, so the first-paint RPCs may be missed (Windows injects at document
+start and captures them too). Anything triggered by **user interaction** is captured on
+all three platforms, which covers everything the rpcid discovery workflow needs.
 
-另外，Wails 每次导航后都会重跑 bootstrap，新副本的抓包开关默认是关的。所以开关状态放在
-`window.__gtaskSniffing` 上而不是闭包里，`session.Watcher` 也会在每次轮询时重新
-`sniffStart`（幂等），避免登录跳转之后静默停止记录。
+Also, Wails re-runs the bootstrap after every navigation, and a fresh copy's sniffing
+switch defaults to off. The switch therefore lives on `window.__gtaskSniffing` rather than
+in a closure, and `session.Watcher` re-issues `sniffStart` on every poll (idempotent) so
+recording cannot silently stop after a login redirect.
 
-## 待办
+## TODO
 
-- [x] 读取层：`snapshot`（`Yz8iP`）解析 + `GET /api/tasks` + 主界面接真实数据
-      （侧栏「所有任务 / 已加星标 / 任务列表（带数量）/ 新建任务列表」、
-      每清单「已完成 (N)」折叠段、已完成行的「完成日期：M月D日周X」）
-- [x] 写入层：`SOV0tb` 同步通道打通，新建 / 改标题 / 改备注 / 加星 / 完成 / 取消完成 /
-      截止日期含时分 / 删除 / 恢复 / 新建清单 / 重命名清单全部可用，并逐项读回验证过
-- [x] 截止日期的槽位：任务 detail 字段 18（下标 17），消息体 `[[秒, 纳秒]]`，
-      读取侧一并解析成 `due.date` / `due.time`
-- [ ] 删除清单：字段级 patch 走不通（错误码 13），需要抓网页端「删除清单」的真实事件组
-- [ ] 任务排序与跨清单移动：槽 8 的操作码还没试对，需要抓一次真实拖拽
-- [ ] 子任务：预计在 `createTask` 的四事件之外再加一个父子关系事件
-- [ ] 重复规则：detail 字段 8 能写进去但不生效，内部结构未摸清
-- [ ] 已完成翻页：快照每清单只回前 10 条，需要抓「加载更多」那个 rpcid
-- [ ] 「所有任务」视图：网页在宽屏下把每个清单渲染成横向并排的列，
-      客户端目前按纵向分段渲染（内容一致、更适合桌面窗口），待确认是否改成横向
-- [ ] 主界面与真实网页并排比对，收敛像素级差异（把会话窗口拖到旁边即可）
-- [x] 三态主题全局化：Go 持久化 + macOS 原生外观（标题栏、会话页一起变），会话页顶栏也有按钮
-- [x] 会话页桌面化：去「Google 应用」九宫格、「支持」菜单加工作台入口、侧栏列表行「⋮」、
-      自定义右键菜单（去掉前进）
-- [x] 启动体验：主题色首屏底色 + 会话页启动遮罩，切主题不再整页重载
-- [x] 界面多语言：toml 词表打包（zh / en），语言按钮与主题按钮并排，加 toml 即加语言
-- [x] 切语言无感化：会话页重载按需欠账（`langNavigator`）、导航期桥接快速失败
-      （`MarkNavigating`）、主窗口垫旧快照，附端到端回归 `scripts/verify-lang-switch.py`
-- [x] 抓包列表折叠「内部同步调用」噪声（临时显隐清单的副作用），可展开看原始记录
-- [x] 应用图标与 macOS 打包脚本（`build/macos-bundle.sh` / `build/macos-icon.sh`）
-- [x] Windows / Linux 桥接对齐（bootstrap 注入路径、`IsMainFrame` 过滤）+ 交叉编译验证
-- [ ] Windows / Linux 实机冒烟测试（需要真实 Windows / Linux 环境与 Google 账号）
-- [x] 掉线检测与自动重登（健康检查识别 401 / 登录重定向 → 横幅 + 弹窗重载）
-- [ ] 本地缓存与离线视图
+- [x] Read layer: `snapshot` (`Yz8iP`) parsing + `GET /api/tasks` + real data in the main
+      window (sidebar "All tasks / Starred / lists with counts / New list", a collapsible
+      "Completed (N)" section per list, and "Completed: M/D weekday" on completed rows)
+- [x] Write layer: the `SOV0tb` sync channel works — create / retitle / edit notes / star
+      / complete / uncomplete / due date with time / delete / restore / create list /
+      rename list all usable and verified by reading them back
+- [x] Due-date slot: task detail field 18 (index 17), payload `[[sec, nsec]]`, parsed on
+      the read side into `due.date` / `due.time`
+- [ ] Delete list: field-level patching does not work (error code 13); needs a capture of
+      the web app's real "delete list" event group
+- [ ] Task reordering and cross-list moves: slot 8's opcode is still wrong; needs one real
+      drag captured
+- [ ] Subtasks: expected to need a parent-child event on top of `createTask`'s four events
+- [ ] Recurrence rules: detail field 8 accepts a write but has no effect; internal
+      structure unknown
+- [ ] Completed paging: the snapshot returns only the first 10 per list; needs the
+      "load more" rpcid captured
+- [ ] "All tasks" view: on wide screens the web app renders each list as a horizontal
+      column; the client currently renders vertical sections (same content, better suited
+      to a desktop window) — still to be decided whether to switch
+- [ ] Side-by-side comparison with the real web page to close pixel-level differences
+      (just drag the session window next to it)
+- [x] Three-state theme globalised: persisted by Go + native macOS appearance (title bar
+      and session page included), with a button in the session page top bar too
+- [x] Session page desktop-ified: "Google apps" waffle removed, workbench entry added to
+      the "Support" menu, "⋮" on sidebar list rows, custom context menu (Forward removed)
+- [x] Startup experience: theme-coloured first paint + session page splash, theme switching
+      no longer reloads the page
+- [x] UI localisation: toml catalogues embedded (zh / en), language button next to the
+      theme button, adding a toml adds a language
+- [x] Seamless language switching: session page reload deferred on demand
+      (`langNavigator`), bridge fails fast during navigation (`MarkNavigating`), main
+      window serves the previous snapshot, plus the end-to-end regression
+      `scripts/verify-lang-switch.py`
+- [x] "Internal sync calls" noise collapsed in the capture list (a side effect of showing
+      / hiding lists temporarily), expandable to the raw records
+- [x] App icon and macOS packaging scripts (`build/macos-bundle.sh` /
+      `build/macos-icon.sh`)
+- [x] Multi-platform packaging and release pipeline (`Makefile` + `scripts/build-*.sh` +
+      `.github/workflows/*.yml`)
+- [x] Windows / Linux bridge parity (bootstrap injection path, `IsMainFrame` filtering) +
+      cross-compilation verified
+- [ ] Windows / Linux on-device smoke tests (need real Windows / Linux machines and a
+      Google account)
+- [x] Dead-session detection and automatic re-login (health check recognises 401 / login
+      redirect → banner + reload popup)
+- [ ] Local cache and offline view
 
-## 风险
+## Risks
 
-- **不分发、不上架也不豁免 ToS**。私有接口访问本身就违反条款。
-- 真正的风险落在**使用者账号**上：限流、强制重新登录，极端情况封号，且不可逆。
-  个人低频使用被识别的概率很低，但不是零。
-- 内部接口没有文档、没有兼容性承诺。Google 每次发版都可能改动 `bl`、rpcid 或参数
-  数组结构，坏了只能重新抓包。请把这当成长期维护成本。
+- **No app-store listing, and no exemption from the ToS.** Accessing private endpoints
+  violates the terms by itself.
+- The real risk lands on **the user's account**: rate limiting, forced re-login, and in
+  extreme cases a ban — irreversible. Low-frequency personal use is unlikely to be
+  detected, but the probability is not zero.
+- The internal endpoints are undocumented and come with no compatibility promise. Any
+  Google release can change `bl`, an rpcid, or the argument array structure, and the only
+  remedy is to capture again. Treat that as the long-term maintenance cost.
+
+## License
+
+MIT — see [`LICENSE`](LICENSE). The code licence changes nothing in the Risks section
+above: using this project to access Google services remains subject to the Google Terms of
+Service.
