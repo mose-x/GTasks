@@ -420,6 +420,12 @@ layer `--no-verify` cannot bypass. The JS and Python toolchains the hooks need
 (prettier / eslint / ruff / pytest) are configured in `package.json`,
 `.prettierrc`, `.prettierignore`, `eslint.config.mjs` and `pyproject.toml`.
 
+`main` is protected on GitHub: the required status checks are `fmt + vet`,
+`test (ubuntu-latest)`, `test (windows-latest)`, `test (macos-latest)` and
+`commit-lint / commit-lint`, and a branch must be up to date before merging.
+Daily work happens on `dev` and reaches `main` through a pull request, so a
+commit that skipped the local hooks still cannot land on `main`.
+
 Two windows appear on launch: **Google Tasks** (the main UI) and **Google Session**
 (loads `tasks.google.com`; it redirects to Google's login page when signed out). The
 **workbench** does not pop up by default — open it from "GTasks Workbench" in the "?" menu

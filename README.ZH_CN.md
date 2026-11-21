@@ -358,6 +358,11 @@ SIGKILL（退出码 137）。装完实在打不开就跑一次 `./scripts/run-fi
 `package.json`、`.prettierrc`、`.prettierignore`、`eslint.config.mjs` 与
 `pyproject.toml`。
 
+GitHub 上 `main` 已开启分支保护：必需状态检查为 `fmt + vet`、`test (ubuntu-latest)`、
+`test (windows-latest)`、`test (macos-latest)` 与 `commit-lint / commit-lint`，并要求
+合并前分支必须是最新的。日常开发在 `dev` 上进行、通过 PR 合入 `main`，所以本地
+`--no-verify` 跳过钩子的提交依然进不了 `main`。
+
 启动后有两个窗口：**Google Tasks**（主界面）与
 **Google 会话**（加载 `tasks.google.com`，未登录会自动跳到 Google 登录页）。
 **逆向工作台**默认不弹，需要时从会话页顶栏「?」菜单里的「GTasks 工作台」打开
