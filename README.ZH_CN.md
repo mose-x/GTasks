@@ -64,7 +64,7 @@ Wails v3 的 `WebviewWindow.ExecJS()` 有 `runtimeLoaded` 门控
 自己回发这条保留消息：
 
 ```js
-send("wails:runtime:ready");   // → WebviewWindow.HandleMessage → runtimeLoaded = true
+send("wails:runtime:ready"); // → WebviewWindow.HandleMessage → runtimeLoaded = true
 ```
 
 于是 `ExecJS` 恢复正常，**不需要 cgo、不需要读原生 cookie store、不需要 fork Wails**，
@@ -76,10 +76,10 @@ handler，`register_script_message_handler(manager, "external")`；Windows
 
 ### 三个平台的注入时机不一样
 
-| 平台 | 注入点 | 时机 |
-| --- | --- | --- |
-| macOS | `webview_window_darwin.go:1755` | `WebViewDidFinishNavigation` 之后 `execJS` |
-| Linux | `webview_window_linux.go:527` | `WindowLoadFinished` 之后 `execJS` |
+| 平台    | 注入点                           | 时机                                                                      |
+| ------- | -------------------------------- | ------------------------------------------------------------------------- |
+| macOS   | `webview_window_darwin.go:1755`  | `WebViewDidFinishNavigation` 之后 `execJS`                                |
+| Linux   | `webview_window_linux.go:527`    | `WindowLoadFinished` 之后 `execJS`                                        |
 | Windows | `webview_window_windows.go:2835` | **仅 HTML 窗口**：`chromium.Init` → `AddScriptToExecuteOnDocumentCreated` |
 
 Windows 那一行是关键坑：`navigateInitialPage` 只在 `options.HTML != ""` 分支里处理
@@ -124,12 +124,12 @@ tasks.google.com），本项目不做轮换；轮换失败最终表现为 401 / 
 网页版切换清单、点「已加星标」、展开「已完成」时**都不会再发请求**——所有视图都由首屏
 那一次数据在本地渲染。所以读取层只需要一个 rpcid：
 
-| | |
-| --- | --- |
-| rpcid | `Yz8iP`（页面 `window.AF_dataServiceRequests["ds:0"].id`） |
-| 端点 | `/_/TasksWebEmbedUi/data/batchexecute`（页面在 `WIZ_global_data.Im6cmf` 里公布） |
-| 参数 | 空数组 |
-| 返回 | 全部清单 + 未完成任务（含服务端声明的显示顺序）+ 每个清单前 10 条已完成任务 + 星标位 + 清单顺序 |
+|       |                                                                                                 |
+| ----- | ----------------------------------------------------------------------------------------------- |
+| rpcid | `Yz8iP`（页面 `window.AF_dataServiceRequests["ds:0"].id`）                                      |
+| 端点  | `/_/TasksWebEmbedUi/data/batchexecute`（页面在 `WIZ_global_data.Im6cmf` 里公布）                |
+| 参数  | 空数组                                                                                          |
+| 返回  | 全部清单 + 未完成任务（含服务端声明的显示顺序）+ 每个清单前 10 条已完成任务 + 星标位 + 清单顺序 |
 
 响应是**位置数组**而不是带键的对象，Google 也不公布任何 schema，所以
 `internal/tasks/model.go` 里的槽位映射是靠「活响应 ↔ 渲染后的 DOM」逐位比对定下来的：
@@ -176,20 +176,20 @@ tasks.google.com），本项目不做轮换；轮换失败最终表现为 401 / 
 
 一个事件是 28 个槽位的数组，有意义的只有这些：
 
-| 槽 | 含义 |
-| --- | --- |
-| 0 | 客户端生成的事件 id（16 位 base64url） |
-| 1 | 实体类型：`2` 账户级清单顺序（单例，无 id）、`3` 任务、`4` 清单 |
-| 2 | 实体 id |
-| 3 | 路径，单事件写入是 `[1]`，新建任务用 `[1]`/`[1,1]`/`[1,2]` |
-| 5 / 6 / 7 | patch，分别对应实体类型 2 / 3 / 4 |
-| 8 | 清单内插入位置：`[任务 id, null, null, null, null, null, 1]` |
-| 9 | 客户端时间戳 `[秒, 纳秒]` |
-| 10 | `[null, 清单 id]`，任务归属 |
-| 11 | `[[], []]`，顺序占位 |
-| 25 | 固定 `1` |
-| 26 | 组内序号（多事件时 1、2、3……） |
-| 27 | 尾部，服务端不校验 |
+| 槽        | 含义                                                            |
+| --------- | --------------------------------------------------------------- |
+| 0         | 客户端生成的事件 id（16 位 base64url）                          |
+| 1         | 实体类型：`2` 账户级清单顺序（单例，无 id）、`3` 任务、`4` 清单 |
+| 2         | 实体 id                                                         |
+| 3         | 路径，单事件写入是 `[1]`，新建任务用 `[1]`/`[1,1]`/`[1,2]`      |
+| 5 / 6 / 7 | patch，分别对应实体类型 2 / 3 / 4                               |
+| 8         | 清单内插入位置：`[任务 id, null, null, null, null, null, 1]`    |
+| 9         | 客户端时间戳 `[秒, 纳秒]`                                       |
+| 10        | `[null, 清单 id]`，任务归属                                     |
+| 11        | `[[], []]`，顺序占位                                            |
+| 25        | 固定 `1`                                                        |
+| 26        | 组内序号（多事件时 1、2、3……）                                  |
+| 27        | 尾部，服务端不校验                                              |
 
 ### patch 与字段号
 
@@ -203,16 +203,16 @@ tasks.google.com），本项目不做轮换；轮换失败最终表现为 401 / 
 
 任务 detail 的字段号（读取侧同一个编号：detail 数组下标 = 字段号 − 1）：
 
-| 字段 | 含义 | 写法 |
-| --- | --- | --- |
-| 1 | 完成 | `1`，与字段 5 一起写 |
-| 2 | 标题 | 字符串 |
-| 3 | 备注 | 字符串，可含换行 |
-| 5 | 完成时间 | `[秒, 纳秒]` |
-| 6 | 已删除 | `1` 删除、空数组恢复。服务端自动把任务从清单顺序里摘掉并写入删除时间（detail 下标 12） |
-| 14 | 星标 | `1`，与字段 15 一起写 |
-| 15 | 星标时间 | `[秒, 纳秒]` |
-| 18 | 截止日期 | 消息体 `[[秒, 纳秒]]`，比普通时间戳多包一层 |
+| 字段 | 含义     | 写法                                                                                   |
+| ---- | -------- | -------------------------------------------------------------------------------------- |
+| 1    | 完成     | `1`，与字段 5 一起写                                                                   |
+| 2    | 标题     | 字符串                                                                                 |
+| 3    | 备注     | 字符串，可含换行                                                                       |
+| 5    | 完成时间 | `[秒, 纳秒]`                                                                           |
+| 6    | 已删除   | `1` 删除、空数组恢复。服务端自动把任务从清单顺序里摘掉并写入删除时间（detail 下标 12） |
+| 14   | 星标     | `1`，与字段 15 一起写                                                                  |
+| 15   | 星标时间 | `[秒, 纳秒]`                                                                           |
+| 18   | 截止日期 | 消息体 `[[秒, 纳秒]]`，比普通时间戳多包一层                                            |
 
 清单：字段 `1` 标题、`3` kind（服务端自己填 `user`）、`5` 排序。账户级顺序单例：字段 `3`
 是逗号分隔的清单 csv，**服务端校验它必须恰好包含全部未删除清单**，所以新建清单前要重新读
@@ -224,12 +224,12 @@ tasks.google.com），本项目不做轮换；轮换失败最终表现为 401 / 
 
 ### 组合出来的操作
 
-| 操作 | 事件 |
-| --- | --- |
-| 新建任务 | 4 个：建实体（带标题）→ 顺序占位（槽 11）→ 插入清单（类型 4 + 槽 8）→ 绑定清单（槽 10）。任务 id 由客户端生成，服务端照用 |
-| 改标题 / 改备注 / 星标 / 完成 / 截止 / 删除 / 恢复 | 1 个任务 patch 事件 |
-| 新建清单 | 2 个：建清单（类型 4，字段 1）+ 重写顺序 csv（类型 2，字段 3） |
-| 重命名清单 | 1 个清单 patch 事件 |
+| 操作                                               | 事件                                                                                                                      |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| 新建任务                                           | 4 个：建实体（带标题）→ 顺序占位（槽 11）→ 插入清单（类型 4 + 槽 8）→ 绑定清单（槽 10）。任务 id 由客户端生成，服务端照用 |
+| 改标题 / 改备注 / 星标 / 完成 / 截止 / 删除 / 恢复 | 1 个任务 patch 事件                                                                                                       |
+| 新建清单                                           | 2 个：建清单（类型 4，字段 1）+ 重写顺序 csv（类型 2，字段 3）                                                            |
+| 重命名清单                                         | 1 个清单 patch 事件                                                                                                       |
 
 这些报文由 Go 现算，**不走 `operations.json` 的模板**——模板表达不了链式时间戳和客户端
 生成的 id。`tasks.Service.Execute` 把它们分派给 `SyncWriter`，工作台里显示成
@@ -249,8 +249,7 @@ batchexecute 调用，参数是 `text/template` 模板。目前 `snapshot` 走�
 上一节的同步通道（注册表里只留说明，不带 steps），其余的还在等抓包：
 
 ```json
-{ "op": "setStarred",
-  "steps": [{ "rpcid": "AbCdE", "args": "[null,{{json .TaskID}},[{{json .Starred}}]]" }] }
+{ "op": "setStarred", "steps": [{ "rpcid": "AbCdE", "args": "[null,{{json .TaskID}},[{{json .Starred}}]]" }] }
 ```
 
 `tasks.Service.Execute(ctx, "snapshot", params)` 渲染模板 → 组批 → 走页面发出 → 解码响应。
@@ -258,11 +257,11 @@ batchexecute 调用，参数是 `text/template` 模板。目前 `snapshot` 走�
 
 注册表落盘在用户配置目录，抓包记录也持久化成 JSONL：
 
-| 平台 | 目录 |
-| --- | --- |
-| macOS | `~/Library/Application Support/gtasks/` |
-| Linux | `~/.config/gtasks/` |
-| Windows | `%AppData%\gtasks\` |
+| 平台    | 目录                                    |
+| ------- | --------------------------------------- |
+| macOS   | `~/Library/Application Support/gtasks/` |
+| Linux   | `~/.config/gtasks/`                     |
+| Windows | `%AppData%\gtasks\`                     |
 
 里面是 `operations.json`（操作映射）和 `captures.jsonl`（抓包历史，只追加）。
 
@@ -318,11 +317,11 @@ make help                   # 全部目标
 应用图标已提交在 `build/macos/GTasks.icns`；只有改了 `build/icon.svg` 才需要 `make icon`
 （用无头 Chrome 栅格化，依赖本机 Chrome）。
 
-| 目标 | 命令 | 依赖 |
-| --- | --- | --- |
-| macOS | `make build` | Xcode Command Line Tools（cgo） |
+| 目标    | 命令                                                               | 依赖                                                                            |
+| ------- | ------------------------------------------------------------------ | ------------------------------------------------------------------------------- |
+| macOS   | `make build`                                                       | Xcode Command Line Tools（cgo）                                                 |
 | Windows | `GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o gtasks.exe .` | 可从 macOS / Linux 交叉编译；运行时需要 WebView2 Runtime（Win10/11 一般已内置） |
-| Linux | `CGO_ENABLED=0 go build -tags purego -o gtasks .` | 只需运行时库 `libgtk-3-0 libwebkit2gtk-4.1-0`（Arch：`gtk3 webkit2gtk-4.1`） |
+| Linux   | `CGO_ENABLED=0 go build -tags purego -o gtasks .`                  | 只需运行时库 `libgtk-3-0 libwebkit2gtk-4.1-0`（Arch：`gtk3 webkit2gtk-4.1`）    |
 
 六个目标（Windows amd64/arm64、Linux amd64/arm64 purego、macOS amd64/arm64）都已通过
 `go build` 验证；Windows 与 Linux 的**实机冒烟测试还没做**。
@@ -332,11 +331,11 @@ make help                   # 全部目标
 `make package`（当前平台）或 `make dist`（三平台 x amd64/arm64）产出到 `build/bin/`，
 命名统一为 `gtasks-<版本>-<平台>-<架构>.<后缀>`（Go 的 `amd64` 在资产名里写 `x64`）：
 
-| 平台 | 产物 | 打包脚本 |
-| --- | --- | --- |
-| macOS | `.dmg` | `scripts/build-macos.sh` |
-| Windows | `.exe` | `scripts/build-windows.sh` |
-| Linux | 裸二进制 + `.tar.gz`（装了 fpm 再给 `.deb` / `.rpm`） | `scripts/build-linux.sh` |
+| 平台    | 产物                                                  | 打包脚本                   |
+| ------- | ----------------------------------------------------- | -------------------------- |
+| macOS   | `.dmg`                                                | `scripts/build-macos.sh`   |
+| Windows | `.exe`                                                | `scripts/build-windows.sh` |
+| Linux   | 裸二进制 + `.tar.gz`（装了 fpm 再给 `.deb` / `.rpm`） | `scripts/build-linux.sh`   |
 
 版本号同时写进二进制（`./gtasks --version`）与 macOS 的 `Info.plist`。
 推 `v*` 标签时 `.github/workflows/build.yml` 自动构建全部目标并发 Release，
@@ -348,6 +347,16 @@ macOS 产物**不做代码签名**：ad-hoc 签名在严格 MDM 管控的机器�
 `com.apple.quarantine`——首次打开走「右键 → 打开」这条 Gatekeeper 旁路。
 **不要 `xattr -cr`**：清掉隔离属性会改走 provenance 校验路径，未签名程序被直接
 SIGKILL（退出码 137）。装完实在打不开就跑一次 `./scripts/run-first-installed-local-mac.sh`。
+
+### 提交规范与分支流程
+
+本仓库接入 [code-hooks](https://github.com/mose-x/code-hooks)：把 `core.hooksPath`
+指向它之后，`commit-msg` 强制 conventional commits、纯 ASCII、subject ≤100 且全文
+≤200 字符；`pre-push` 只允许推 `dev`（`main` 靠 PR 合入），并在推送前跑
+`go test` / `npm test` / `pytest`。PR 上另有 `commit-lint` 工作流兜底——那是唯一
+一层 `--no-verify` 绕不过去的防线。hook 需要的 JS / Python 工具链配置在
+`package.json`、`.prettierrc`、`.prettierignore`、`eslint.config.mjs` 与
+`pyproject.toml`。
 
 启动后有两个窗口：**Google Tasks**（主界面）与
 **Google 会话**（加载 `tasks.google.com`，未登录会自动跳到 Google 登录页）。

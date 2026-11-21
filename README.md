@@ -72,7 +72,7 @@ the Wails runtime bundle, so `ExecJS` silently queues scripts that never run.
 first thing it does is send that reserved message itself:
 
 ```js
-send("wails:runtime:ready");   // → WebviewWindow.HandleMessage → runtimeLoaded = true
+send("wails:runtime:ready"); // → WebviewWindow.HandleMessage → runtimeLoaded = true
 ```
 
 `ExecJS` then works normally — **no cgo, no reading the native cookie store, no Wails
@@ -84,11 +84,11 @@ Windows `chrome.webview.postMessage` → `TryGetWebMessageAsString`), received b
 
 ### Injection timing differs per platform
 
-| Platform | Injection point | When |
-| --- | --- | --- |
-| macOS | `webview_window_darwin.go:1755` | `execJS` after `WebViewDidFinishNavigation` |
-| Linux | `webview_window_linux.go:527` | `execJS` after `WindowLoadFinished` |
-| Windows | `webview_window_windows.go:2835` | **HTML windows only**: `chromium.Init` → `AddScriptToExecuteOnDocumentCreated` |
+| Platform | Injection point                  | When                                                                           |
+| -------- | -------------------------------- | ------------------------------------------------------------------------------ |
+| macOS    | `webview_window_darwin.go:1755`  | `execJS` after `WebViewDidFinishNavigation`                                    |
+| Linux    | `webview_window_linux.go:527`    | `execJS` after `WindowLoadFinished`                                            |
+| Windows  | `webview_window_windows.go:2835` | **HTML windows only**: `chromium.Init` → `AddScriptToExecuteOnDocumentCreated` |
 
 That Windows line is the important trap: `navigateInitialPage` only handles `options.JS`
 in the `options.HTML != ""` branch; for an external-URL window the `default:` branch just
@@ -143,12 +143,12 @@ Switching lists, clicking "Starred", expanding "Completed" — the web app issue
 further requests** for any of it; every view is rendered locally from the single
 first-paint payload. So the read layer needs exactly one rpcid:
 
-| | |
-| --- | --- |
-| rpcid | `Yz8iP` (the page's `window.AF_dataServiceRequests["ds:0"].id`) |
-| endpoint | `/_/TasksWebEmbedUi/data/batchexecute` (published by the page in `WIZ_global_data.Im6cmf`) |
-| args | empty array |
-| returns | every list + open tasks (including the server-declared display order) + the first 10 completed tasks per list + star flags + list order |
+|          |                                                                                                                                         |
+| -------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| rpcid    | `Yz8iP` (the page's `window.AF_dataServiceRequests["ds:0"].id`)                                                                         |
+| endpoint | `/_/TasksWebEmbedUi/data/batchexecute` (published by the page in `WIZ_global_data.Im6cmf`)                                              |
+| args     | empty array                                                                                                                             |
+| returns  | every list + open tasks (including the server-declared display order) + the first 10 completed tasks per list + star flags + list order |
 
 The response is an array of **positional slots**, not keyed objects, and Google publishes
 no schema, so the slot map in `internal/tasks/model.go` was established by comparing live
@@ -205,20 +205,20 @@ value, and on error code 3 it polls again and retries (`SyncWriter.commit`).
 
 An event is an array of 28 slots; only these carry meaning:
 
-| Slot | Meaning |
-| --- | --- |
-| 0 | Client-generated event id (16 chars, base64url) |
-| 1 | Entity type: `2` account-level list order (singleton, no id), `3` task, `4` list |
-| 2 | Entity id |
-| 3 | Path; `[1]` for a single-event write, `[1]`/`[1,1]`/`[1,2]` when creating a task |
-| 5 / 6 / 7 | Patch, for entity types 2 / 3 / 4 respectively |
-| 8 | Insert position inside a list: `[taskId, null, null, null, null, null, 1]` |
-| 9 | Client timestamp `[sec, nsec]` |
-| 10 | `[null, listId]`, the task's parent list |
-| 11 | `[[], []]`, order placeholder |
-| 25 | Constant `1` |
-| 26 | Sequence number within the group (1, 2, 3… for multi-event writes) |
-| 27 | Tail, not validated by the server |
+| Slot      | Meaning                                                                          |
+| --------- | -------------------------------------------------------------------------------- |
+| 0         | Client-generated event id (16 chars, base64url)                                  |
+| 1         | Entity type: `2` account-level list order (singleton, no id), `3` task, `4` list |
+| 2         | Entity id                                                                        |
+| 3         | Path; `[1]` for a single-event write, `[1]`/`[1,1]`/`[1,2]` when creating a task |
+| 5 / 6 / 7 | Patch, for entity types 2 / 3 / 4 respectively                                   |
+| 8         | Insert position inside a list: `[taskId, null, null, null, null, null, 1]`       |
+| 9         | Client timestamp `[sec, nsec]`                                                   |
+| 10        | `[null, listId]`, the task's parent list                                         |
+| 11        | `[[], []]`, order placeholder                                                    |
+| 25        | Constant `1`                                                                     |
+| 26        | Sequence number within the group (1, 2, 3… for multi-event writes)               |
+| 27        | Tail, not validated by the server                                                |
 
 ### Patches and field numbers
 
@@ -234,16 +234,16 @@ written.
 Field numbers for a task's detail (the read side uses the same numbering: detail array
 index = field number − 1):
 
-| Field | Meaning | How to write it |
-| --- | --- | --- |
-| 1 | Completed | `1`, written together with field 5 |
-| 2 | Title | string |
-| 3 | Notes | string, may contain newlines |
-| 5 | Completed at | `[sec, nsec]` |
-| 6 | Deleted | `1` to delete, empty array to restore. The server removes the task from the list order by itself and records the deletion time (detail index 12) |
-| 14 | Starred | `1`, written together with field 15 |
-| 15 | Starred at | `[sec, nsec]` |
-| 18 | Due date | payload `[[sec, nsec]]`, wrapped one level deeper than a plain timestamp |
+| Field | Meaning      | How to write it                                                                                                                                  |
+| ----- | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 1     | Completed    | `1`, written together with field 5                                                                                                               |
+| 2     | Title        | string                                                                                                                                           |
+| 3     | Notes        | string, may contain newlines                                                                                                                     |
+| 5     | Completed at | `[sec, nsec]`                                                                                                                                    |
+| 6     | Deleted      | `1` to delete, empty array to restore. The server removes the task from the list order by itself and records the deletion time (detail index 12) |
+| 14    | Starred      | `1`, written together with field 15                                                                                                              |
+| 15    | Starred at   | `[sec, nsec]`                                                                                                                                    |
+| 18    | Due date     | payload `[[sec, nsec]]`, wrapped one level deeper than a plain timestamp                                                                         |
 
 Lists: field `1` title, `3` kind (the server fills in `user` itself), `5` sort order. The
 account-level order singleton: field `3` is a comma-separated list csv, and **the server
@@ -258,12 +258,12 @@ the same rule: UTC midnight → date only, anything else → local date + time.
 
 ### Operations built out of this
 
-| Operation | Events |
-| --- | --- |
-| Create task | 4: create entity (with title) → order placeholder (slot 11) → insert into list (type 4 + slot 8) → bind list (slot 10). The task id is generated client-side and the server adopts it |
-| Retitle / edit notes / star / complete / due / delete / restore | 1 task patch event |
-| Create list | 2: create list (type 4, field 1) + rewrite the order csv (type 2, field 3) |
-| Rename list | 1 list patch event |
+| Operation                                                       | Events                                                                                                                                                                                |
+| --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Create task                                                     | 4: create entity (with title) → order placeholder (slot 11) → insert into list (type 4 + slot 8) → bind list (slot 10). The task id is generated client-side and the server adopts it |
+| Retitle / edit notes / star / complete / due / delete / restore | 1 task patch event                                                                                                                                                                    |
+| Create list                                                     | 2: create list (type 4, field 1) + rewrite the order csv (type 2, field 3)                                                                                                            |
+| Rename list                                                     | 1 list patch event                                                                                                                                                                    |
 
 These messages are computed by Go on the fly and **do not go through the
 `operations.json` templates** — templates cannot express chained timestamps or
@@ -288,8 +288,7 @@ template, 12 write operations go through the sync channel described above (the r
 only keeps their description, no steps), and the rest are still waiting on captures:
 
 ```json
-{ "op": "setStarred",
-  "steps": [{ "rpcid": "AbCdE", "args": "[null,{{json .TaskID}},[{{json .Starred}}]]" }] }
+{ "op": "setStarred", "steps": [{ "rpcid": "AbCdE", "args": "[null,{{json .TaskID}},[{{json .Starred}}]]" }] }
 ```
 
 `tasks.Service.Execute(ctx, "snapshot", params)` renders the template → batches → sends
@@ -299,11 +298,11 @@ through the page → decodes the response. Every button in the main window calls
 The registry is persisted in the user config directory, and captures are persisted as
 JSONL:
 
-| Platform | Directory |
-| --- | --- |
-| macOS | `~/Library/Application Support/gtasks/` |
-| Linux | `~/.config/gtasks/` |
-| Windows | `%AppData%\gtasks\` |
+| Platform | Directory                               |
+| -------- | --------------------------------------- |
+| macOS    | `~/Library/Application Support/gtasks/` |
+| Linux    | `~/.config/gtasks/`                     |
+| Windows  | `%AppData%\gtasks\`                     |
 
 Inside: `operations.json` (the operation map) and `captures.jsonl` (append-only capture
 history).
@@ -373,11 +372,11 @@ downloads 1.26 automatically). The `Makefile` defaults `GOPROXY` to
 `build/macos/GTasks.icns`; run `make icon` only after changing `build/icon.svg` (it
 rasterises with headless Chrome, so a local Chrome is required).
 
-| Target | Command | Dependencies |
-| --- | --- | --- |
-| macOS | `make build` | Xcode Command Line Tools (cgo) |
+| Target  | Command                                                            | Dependencies                                                                                                 |
+| ------- | ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------ |
+| macOS   | `make build`                                                       | Xcode Command Line Tools (cgo)                                                                               |
 | Windows | `GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o gtasks.exe .` | Cross-compiles from macOS / Linux; needs the WebView2 Runtime at run time (usually preinstalled on Win10/11) |
-| Linux | `CGO_ENABLED=0 go build -tags purego -o gtasks .` | Runtime libraries only: `libgtk-3-0 libwebkit2gtk-4.1-0` (Arch: `gtk3 webkit2gtk-4.1`) |
+| Linux   | `CGO_ENABLED=0 go build -tags purego -o gtasks .`                  | Runtime libraries only: `libgtk-3-0 libwebkit2gtk-4.1-0` (Arch: `gtk3 webkit2gtk-4.1`)                       |
 
 All six targets (Windows amd64/arm64, Linux amd64/arm64 purego, macOS amd64/arm64) are
 verified with `go build`; **on-device smoke tests for Windows and Linux are still
@@ -389,11 +388,11 @@ outstanding**.
 `build/bin/`, with names following `gtasks-<version>-<platform>-<arch>.<ext>` (Go's
 `amd64` becomes `x64` in asset names):
 
-| Platform | Artifacts | Script |
-| --- | --- | --- |
-| macOS | `.dmg` | `scripts/build-macos.sh` |
-| Windows | `.exe` | `scripts/build-windows.sh` |
-| Linux | bare binary + `.tar.gz` (plus `.deb` / `.rpm` when fpm is installed) | `scripts/build-linux.sh` |
+| Platform | Artifacts                                                            | Script                     |
+| -------- | -------------------------------------------------------------------- | -------------------------- |
+| macOS    | `.dmg`                                                               | `scripts/build-macos.sh`   |
+| Windows  | `.exe`                                                               | `scripts/build-windows.sh` |
+| Linux    | bare binary + `.tar.gz` (plus `.deb` / `.rpm` when fpm is installed) | `scripts/build-linux.sh`   |
 
 The version is stamped both into the binary (`./gtasks --version`) and into the macOS
 `Info.plist`. Pushing a `v*` tag makes `.github/workflows/build.yml` build every target
@@ -409,6 +408,17 @@ first launch then goes through the Gatekeeper "right-click → Open" bypass. **D
 `xattr -cr`**: clearing the quarantine attribute routes the launch through the provenance
 path, which SIGKILLs unsigned binaries (exit 137). If an install still refuses to launch,
 run `./scripts/run-first-installed-local-mac.sh` once.
+
+### Commit rules and branch flow
+
+This repo adopts [code-hooks](https://github.com/mose-x/code-hooks): with
+`core.hooksPath` pointed at it, `commit-msg` enforces conventional commits, pure
+ASCII, subject <= 100 and total <= 200 characters; `pre-push` only allows pushing
+`dev` (`main` is updated by merging PRs) and runs `go test` / `npm test` /
+`pytest` before the push. PRs additionally run the `commit-lint` workflow, the one
+layer `--no-verify` cannot bypass. The JS and Python toolchains the hooks need
+(prettier / eslint / ruff / pytest) are configured in `package.json`,
+`.prettierrc`, `.prettierignore`, `eslint.config.mjs` and `pyproject.toml`.
 
 Two windows appear on launch: **Google Tasks** (the main UI) and **Google Session**
 (loads `tasks.google.com`; it redirects to Google's login page when signed out). The

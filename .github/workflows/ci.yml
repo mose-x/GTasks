@@ -26,7 +26,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.26'
+          go-version: "1.26"
           cache: true
 
       - name: Check formatting
@@ -57,14 +57,14 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
-            cgo: '0'
-            tags: '-tags purego'
+            cgo: "0"
+            tags: "-tags purego"
           - os: windows-latest
-            cgo: '0'
-            tags: ''
+            cgo: "0"
+            tags: ""
           - os: macos-latest
-            cgo: '1'
-            tags: ''
+            cgo: "1"
+            tags: ""
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     env:
@@ -75,7 +75,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.26'
+          go-version: "1.26"
           cache: true
 
       # internal/bridge 用 Node 把 bootstrap.js 跑在伪造的 tasks.google.com 里，
@@ -83,10 +83,24 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: "20"
 
       - name: Build
         run: go build ${{ matrix.tags }} ./...
 
       - name: Test
         run: go test ${{ matrix.tags }} ./...
+
+  # commit-lint：PR 里的每条提交都过一遍提交信息与身份规则。
+  # 复用 code-hooks 仓库的 hooks 作为唯一事实来源：
+  #   - commit-msg 规则：conventional commits / 纯 ASCII / subject 与全文长度 / 禁用词
+  #   - [identities] 里的作者与提交者邮箱白名单
+  #   - 附注标签校验（tagger 邮箱 + ASCII + 禁用词）
+  # code-hooks 是公开仓库，runner 走匿名 HTTPS clone，不需要 secrets 或 deploy key。
+  # 在受保护分支上把 `commit-lint / commit-lint` 设为必需状态检查，
+  # 那是唯一一层 `git commit --no-verify` 绕不过去的防线。
+  commit-lint:
+    name: commit-lint
+    if: github.event_name == 'pull_request'
+    # pinned 2026-11-21 at code-hooks main HEAD; bump deliberately, not by accident
+    uses: mose-x/code-hooks/.github/workflows/commit-lint.yml@63b237879d0d089e74ed7555c92e0f9cbbdaf4b8
