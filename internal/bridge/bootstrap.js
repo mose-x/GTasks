@@ -662,15 +662,20 @@
   // 改造。全部走「注入 DOM + 回调 Go」的路线，不替换 Google 自己的逻辑：
   //   1. 顶栏去掉「Google 应用」九宫格（纯 CSS，见 installUIStyles）；
   //   2. 顶栏「支持」按钮右边加主题按钮，弹原生的明亮 / 暗黑 / 跟随系统单选菜单；
-  //   3. 「支持」菜单末尾追加「GTasks 工作台」一项；
+  //   3. 「支持」菜单里的「帮助」原地改造成「GTasks 工作台」并挪到末尾
+  //      （桌面客户端里帮助页没有意义，正好腾出这一项）；
   //   4. 侧栏每个任务列表行加「列表选项」入口，点的还是 Google 自己的菜单，
   //      但菜单会被挪到 ⋮ 正下方，且不会顺带把清单切走；
-  //   5. 右键统一交给 Go 弹原生菜单（WebKit 默认菜单带前进/后退，用不上）。
+  //   5. 右键统一交给 Go 弹原生菜单（WebKit 默认菜单带前进/后退，用不上）；
+  //   6. 页面首屏渲染出来之前盖一层与主题同色的启动遮罩，不闪白屏。
   //
   // 测试沙箱里的 document 只有几个字段，没有 DOM API，整段自动跳过。
 
   var UI_MODES = ["light", "dark", "system"];
   var UI_THEME_TITLE = { light: "主题：明亮", dark: "主题：暗黑", system: "主题：跟随系统" };
+  // 与 frontend/shared.js 用同一个键名：两个窗口各自的 origin 下都存一份，
+  // 首屏（以及下面的启动遮罩）不必等 Go 回话就能拿到正确配色。
+  var UI_THEME_KEY = "gtasks-theme";
   var UI_THEME_ICON = {
     light: '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M12 7c-2.76 0-5 2.24-5 5s2.24 5 5 5 5-2.24 5-5-2.24-5-5-5zM2 13h2c.55 0 1-.45 1-1s-.45-1-1-1H2c-.55 0-1 .45-1 1s.45 1 1 1zm18 0h2c.55 0 1-.45 1-1s-.45-1-1-1h-2c-.55 0-1 .45-1 1s.45 1 1 1zM11 2v2c0 .55.45 1 1 1s1-.45 1-1V2c0-.55-.45-1-1-1s-1 .45-1 1zm0 18v2c0 .55.45 1 1 1s1-.45 1-1v-2c0-.55-.45-1-1-1s-1 .45-1 1zM5.99 4.58c-.39-.39-1.03-.39-1.41 0-.39.39-.39 1.03 0 1.41l1.06 1.06c.39.39 1.03.39 1.41 0s.39-1.03 0-1.41L5.99 4.58zm12.37 12.37c-.39-.39-1.03-.39-1.41 0-.39.39-.39 1.03 0 1.41l1.06 1.06c.39.39 1.03.39 1.41 0 .39-.39.39-1.03 0-1.41l-1.06-1.06zm1.06-10.96c.39-.39.39-1.03 0-1.41-.39-.39-1.03-.39-1.41 0l-1.06 1.06c-.39.39-.39 1.03 0 1.41s1.03.39 1.41 0l1.06-1.06zM7.05 18.36c.39.39.39 1.03 0 1.41-.39.39-1.03.39-1.41 0l-1.06-1.06c-.39-.39-.39-1.03 0-1.41.39-.39 1.03-.39 1.41 0l1.06 1.06z"/></svg>',
     dark: '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M12 3c-4.97 0-9 4.03-9 9s4.03 9 9 9 9-4.03 9-9c0-.46-.04-.92-.1-1.36-.98 1.37-2.58 2.26-4.4 2.26-2.98 0-5.4-2.42-5.4-5.4 0-1.81.89-3.42 2.26-4.4-.44-.06-.9-.1-1.36-.1z"/></svg>',
@@ -678,6 +683,7 @@
   };
   var UI_MORE_ICON = '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/></svg>';
   var SUPPORT_MENU_SELECTOR = 'ul[role="menu"][aria-label*="支持"], ul[role="menu"][aria-label*="Support"]';
+  var SUPPORT_BUTTON_SELECTOR = 'button[aria-label*="支持"], button[aria-label*="Support"]';
   var LIST_ROW_SELECTOR = "li[data-task-list-id]";
   var LIST_OPTIONS_SELECTOR = '[aria-label="列表选项"], [aria-label="List options"]';
   // Google 的浮层菜单是 div[role=menu]（侧栏里那些常驻的 ul[role=menu] 不算）。
@@ -703,8 +709,13 @@
     style.textContent = [
       // 「Google 应用」九宫格对桌面客户端没有意义，直接藏掉。
       'a.gb_C[aria-label*="Google 应用"], a.gb_C[aria-label*="Google apps"], a.gb_C[href*="/about/products"] { display: none !important; }',
-      ".gtasks-hbtn { width: 40px; height: 40px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; color: inherit; flex: none; }",
+      ".gtasks-hbtn { width: 40px; height: 40px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; color: inherit; }",
       ".gtasks-hbtn:hover, .gtasks-hbtn:focus { background: rgba(128,134,139,.14); outline: none; }",
+      // 主题按钮绝对定位到「?」右侧。Google 那个行内容器里混着 block 级的
+      // 墨水（ripple）容器，按钮留在行内会被挤到第二行，把顶栏撑高 40px，
+      // 连带「支持」菜单也弹到顶栏上面去。宿主容器补 padding 让出位置，
+      // 具体 top/right 由 installHeaderButtons 按实测偏移写死。
+      "[data-gtasks-theme-host] { padding-right: 48px !important; box-sizing: border-box; }",
       "li[data-task-list-id] { position: relative; }",
       ".gtasks-rowmenu { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); width: 28px; height: 28px; border-radius: 50%; display: none; align-items: center; justify-content: center; cursor: pointer; color: inherit; z-index: 2; }",
       "li[data-task-list-id]:hover .gtasks-rowmenu, .gtasks-rowmenu:focus { display: inline-flex; }",
@@ -729,11 +740,30 @@
     button.setAttribute("aria-label", UI_THEME_TITLE[mode]);
   }
 
+  // 「?」按钮最近的定位祖先（实测是 .yVc39c，position:relative）。找不到就退
+  // 一步用父元素并自己给它加定位，保证按钮的绝对坐标有个稳定的参照系。
+  function themeHost(support) {
+    var node = support.parentElement;
+    while (node && node !== document.body && node !== document.documentElement) {
+      var position = "";
+      try { position = window.getComputedStyle(node).position; } catch (ignored) { break; }
+      if (position === "relative" || position === "absolute" || position === "fixed") return node;
+      node = node.parentElement;
+    }
+    var fallback = support.parentElement;
+    if (fallback) fallback.style.position = "relative";
+    return fallback;
+  }
+
   function installHeaderButtons() {
-    var support = document.querySelector('button[aria-label*="支持"], button[aria-label*="Support"]');
-    if (!support || !support.parentElement) return;
-    if (!document.getElementById("gtasks-theme-btn")) {
-      var button = document.createElement("div");
+    var support = document.querySelector(SUPPORT_BUTTON_SELECTOR);
+    if (!support) return;
+    var host = themeHost(support);
+    if (!host) return;
+    host.setAttribute("data-gtasks-theme-host", "1");
+    var button = document.getElementById("gtasks-theme-btn");
+    if (!button) {
+      button = document.createElement("div");
       button.id = "gtasks-theme-btn";
       button.className = "gtasks-hbtn";
       button.setAttribute("role", "button");
@@ -748,9 +778,17 @@
       button.addEventListener("keydown", function (event) {
         if (event.key === "Enter" || event.key === " ") button.click();
       });
-      // 问号在前、主题在后。
-      support.parentElement.insertBefore(button, support.nextSibling);
     }
+    // 挂在宿主容器上（不是「?」所在的那个 span）：绝对定位不参与行内排版，
+    // Google 之后怎么重排自己的子节点都影响不到我们。
+    if (button.parentElement !== host) host.appendChild(button);
+    // padding-right 生效后「?」已经左移，按实测偏移把主题按钮摆到它右边 4px。
+    void host.offsetWidth;
+    var supportRect = support.getBoundingClientRect();
+    var hostRect = host.getBoundingClientRect();
+    button.style.position = "absolute";
+    button.style.top = Math.round(supportRect.top - hostRect.top) + "px";
+    button.style.right = Math.max(2, Math.round(hostRect.right - supportRect.right) - 44) + "px";
     renderThemeButton();
   }
 
@@ -765,18 +803,39 @@
     }, 60);
   }
 
-  function decorateSupportMenu(menu) {
-    if (!menu || menu.querySelector("[data-gtasks-workbench]")) return;
-    var item = document.createElement("li");
-    item.className = "aqdrmf-rymPhb-ibnC6b aqdrmf-rymPhb-ibnC6b-OWXEXe-hXIJHe aqdrmf-rymPhb-ibnC6b-OWXEXe-SfQLQb-Woal0c-RWgCYc O68mGe-xl07Ob-ibnC6b-OWXEXe-r08add";
-    item.setAttribute("role", "menuitem");
-    item.setAttribute("tabindex", "0");
+  var WORKBENCH_LABEL = "GTasks 工作台";
+
+  function menuItems(menu) {
+    return menu.querySelectorAll('li[role="menuitem"]');
+  }
+
+  // 「帮助」在桌面客户端里只是打开一个网页，用户要求去掉。
+  function findHelpItem(menu) {
+    var items = menuItems(menu);
+    for (var index = 0; index < items.length; index++) {
+      var label = (items[index].getAttribute("aria-label") || items[index].textContent || "").trim();
+      if (label === "帮助" || label === "Help") return items[index];
+    }
+    return null;
+  }
+
+  // 把「帮助」这一项原地改造成「GTasks 工作台」再挪到菜单末尾：沿用 Google
+  // 自己的 li（类名、内层结构、行高、悬停高亮、键盘导航全都一致）。自己新造
+  // 一个 li 会缺 Google 的状态类，高度比别人矮一截、hover 也没反应。
+  function relabelAsWorkbench(item, menu) {
+    // 只摘掉 jsaction 里的 click 段：Google 的事件是按属性委托到根节点分发的，
+    // 留着就会在点「工作台」时顺带打开帮助页；hover / ripple / 键盘那些保留。
+    var jsaction = item.getAttribute("jsaction") || "";
+    if (jsaction) {
+      item.setAttribute("jsaction", jsaction.replace(/(?:^|;)\s*click:[^;]*/g, "").replace(/^;\s*/, ""));
+    }
+    item.removeAttribute("jslog");
     item.setAttribute("data-gtasks-workbench", "1");
-    item.innerHTML =
-      '<span class="UTNHae"></span><span class="dNKuRb aqdrmf-rymPhb-sNKcce"></span>' +
-      '<span class="aqdrmf-rymPhb-KkROqb"></span>' +
-      '<span class="aqdrmf-rymPhb-Gtdoyb"><span class="aqdrmf-rymPhb-fpDzbe-fmcmS">GTasks 工作台</span></span>' +
-      '<span class="aqdrmf-rymPhb-JMEf7e"></span>';
+    item.setAttribute("aria-label", WORKBENCH_LABEL);
+    item.setAttribute("title", WORKBENCH_LABEL);
+    var label = item.querySelector(".aqdrmf-rymPhb-fpDzbe-fmcmS");
+    if (label) label.textContent = WORKBENCH_LABEL;
+    else item.textContent = WORKBENCH_LABEL;
     item.addEventListener("click", function (event) {
       event.stopPropagation();
       event.preventDefault();
@@ -784,6 +843,19 @@
       uiCommand("openWorkbench", {});
     });
     menu.appendChild(item);
+  }
+
+  function decorateSupportMenu(menu) {
+    if (!menu || menu.querySelector("[data-gtasks-workbench]")) return;
+    var item = findHelpItem(menu);
+    if (!item) {
+      // Google 万一改了菜单结构：克隆最后一项拿到完整的状态类，再改造它。
+      var items = menuItems(menu);
+      if (!items.length) return;
+      item = items[items.length - 1].cloneNode(true);
+      menu.appendChild(item);
+    }
+    relabelAsWorkbench(item, menu);
   }
 
   // 内容区的「列表选项」按钮和清单标题在同一个 section 里，标题 id 就是
@@ -967,8 +1039,99 @@
     observer.observe(document.body, { childList: true, subtree: true });
   }
 
+  // -------------------------------------------------------------- 启动遮罩
+  //
+  // 从导航开始到 Google 首屏渲染完，中间有 1~3 秒是白屏（登录态检查 + 懒加载
+  // chunk），深色模式下尤其刺眼。bootstrap 是 document-start 注入的，所以能在
+  // 页面自己的 CSS 之前盖一层与当前主题同色的遮罩 + 转圈，等 Tasks 的外壳出来
+  // 再淡出。遮罩不吃鼠标事件、带硬超时，任何情况下都不会把用户挡在页面外面。
+
+  var SPLASH_ID = "gtasks-splash";
+  var SPLASH_TIMEOUT = 8000;
+  var SPLASH_POLL = 90;
+  // 首屏就绪的信号：Tasks 自己的顶栏按钮组、侧栏清单行，或 Google 的页面容器。
+  var SPLASH_READY_SELECTOR = '.yVc39c, li[data-task-list-id], c-wiz';
+  var SPLASH_LOGO = '<svg viewBox="44 38 104 104" width="26" height="26" aria-hidden="true"><path fill="none" stroke="#fff" stroke-linecap="round" stroke-linejoin="round" stroke-width="15" d="m61 90 22.172 22.172a4 4 0 0 0 5.656 0L138 63"/></svg>';
+
+  function splashDark() {
+    var mode = "system";
+    try { mode = localStorage.getItem(UI_THEME_KEY) || "system"; } catch (ignored) {}
+    if (mode === "light") return false;
+    if (mode === "dark") return true;
+    try {
+      return !!(window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
+    } catch (ignored) {
+      return false;
+    }
+  }
+
+  function hideSplash() {
+    var splash = document.getElementById(SPLASH_ID);
+    if (!splash || splash.getAttribute("data-gtasks-hiding")) return;
+    splash.setAttribute("data-gtasks-hiding", "1");
+    splash.style.opacity = "0";
+    setTimeout(function () {
+      if (splash.parentNode) splash.parentNode.removeChild(splash);
+      var style = document.getElementById(SPLASH_ID + "-style");
+      if (style && style.parentNode) style.parentNode.removeChild(style);
+    }, 280);
+  }
+
+  function watchSplash() {
+    var started = Date.now();
+    var tick = function () {
+      if (!document.getElementById(SPLASH_ID)) return;
+      var rendered = false;
+      try {
+        rendered = document.readyState !== "loading" && !!document.querySelector(SPLASH_READY_SELECTOR);
+      } catch (ignored) {}
+      if (rendered || Date.now() - started > SPLASH_TIMEOUT) {
+        hideSplash();
+        return;
+      }
+      setTimeout(tick, SPLASH_POLL);
+    };
+    setTimeout(tick, SPLASH_POLL);
+    // 用户已经在点页面了，说明遮罩该走了（也兜住首屏信号识别不出来的情况）。
+    var events = ["pointerdown", "mousedown", "keydown", "wheel", "touchstart"];
+    for (var index = 0; index < events.length; index++) {
+      try { window.addEventListener(events[index], hideSplash, true); } catch (ignored) {}
+    }
+  }
+
+  function installSplash() {
+    if (document.getElementById(SPLASH_ID)) return;
+    var palette = splashDark()
+      ? { bg: "#1b1b1b", fg: "#9aa0a6", accent: "#8ab4f8" }
+      : { bg: "#f8fafd", fg: "#5f6368", accent: "#1a73e8" };
+    var style = document.createElement("style");
+    style.id = SPLASH_ID + "-style";
+    style.textContent = "@keyframes gtasks-splash-spin { to { transform: rotate(360deg); } }";
+    var splash = document.createElement("div");
+    splash.id = SPLASH_ID;
+    splash.setAttribute("style", [
+      "position:fixed", "left:0", "top:0", "right:0", "bottom:0", "z-index:2147483000",
+      "display:flex", "flex-direction:column", "align-items:center", "justify-content:center",
+      "background:" + palette.bg, "color:" + palette.fg, "pointer-events:none",
+      "font:13px/1.4 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'PingFang SC','Microsoft YaHei',sans-serif",
+      "opacity:1", "transition:opacity .24s ease"
+    ].join(";"));
+    splash.innerHTML =
+      '<div style="width:54px;height:54px;border-radius:16px;background:' + palette.accent +
+      ';display:flex;align-items:center;justify-content:center;margin-bottom:22px">' + SPLASH_LOGO + '</div>' +
+      '<div style="display:flex;align-items:center;gap:10px">' +
+      '<span style="width:15px;height:15px;border-radius:50%;border:2px solid ' + palette.accent +
+      ';border-top-color:transparent;animation:gtasks-splash-spin .8s linear infinite"></span>' +
+      '<span>正在载入 Google Tasks…</span></div>';
+    (document.head || document.documentElement).appendChild(style);
+    (document.body || document.documentElement).appendChild(splash);
+    watchSplash();
+  }
+
   function installUI() {
     if (!uiAvailable() || location.hostname !== "tasks.google.com") return;
+    // 遮罩要抢在页面自己的首帧之前，所以放在最前面，且不受「已安装」短路影响。
+    installSplash();
     if (window.__gtaskUIInstalled) {
       renderThemeButton();
       decorateRows(document);
@@ -987,10 +1150,28 @@
     else document.addEventListener("DOMContentLoaded", boot);
   }
 
+  // 页面配色全靠 prefers-color-scheme 媒体查询驱动（实测 98 个 media 块），
+  // 原生外观一变就会立刻重算，不需要重载会话页——之前每次切主题都 Reload
+  // 一次，白白卡上两三秒。只有媒体查询确实没跟上（个别 WebView 不同步窗口
+  // 外观）才请 Go 兜底重载，dark 由 Go 传入，页面自己算不出「应该是什么」。
+  function verifyColorScheme(expectedDark) {
+    if (typeof expectedDark !== "boolean" || !window.matchMedia) return;
+    setTimeout(function () {
+      try {
+        if (window.matchMedia("(prefers-color-scheme: dark)").matches !== expectedDark) {
+          uiCommand("reloadForTheme", {});
+        }
+      } catch (ignored) {}
+    }, 700);
+  }
+
   // Go 侧在页面 ready 后把当前主题推下来，按钮图标随之刷新。
-  api.setThemeMode = function (mode) {
+  api.setThemeMode = function (mode, dark) {
     window.__gtaskThemeMode = UI_MODES.indexOf(mode) >= 0 ? mode : "system";
+    // 存一份给下次启动的启动遮罩用：它跑在 document-start，等不到 Go 回话。
+    try { localStorage.setItem(UI_THEME_KEY, window.__gtaskThemeMode); } catch (ignored) {}
     renderThemeButton();
+    verifyColorScheme(dark);
   };
 
 

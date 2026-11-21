@@ -6,6 +6,7 @@ package theme
 #cgo CFLAGS: -x objective-c
 #cgo LDFLAGS: -framework Cocoa
 #import <Cocoa/Cocoa.h>
+#import <objc/message.h>
 #include <stdlib.h>
 
 // 把整个 App 的外观切到指定 NSAppearance 名字；name 为空表示跟随系统。
@@ -44,6 +45,34 @@ static int gtasksSystemIsDark(void) {
 	return dark;
 }
 
+// 在视图树里找 WKWebView。不 import WebKit，用类名前缀判断，省一个框架依赖。
+static id gtasksFindWebview(NSView *view) {
+	if (view == nil) return nil;
+	if ([NSStringFromClass([view class]) hasPrefix:@"WKWebView"]) return view;
+	for (NSView *sub in [view subviews]) {
+		id found = gtasksFindWebview(sub);
+		if (found) return found;
+	}
+	return nil;
+}
+
+// 设 webview 的首屏底色。underPageBackgroundColor 是 macOS 12 起的公开属性，
+// 页面第一帧画出来之前 WebKit 涂的就是它，专门用来避免深色模式下闪白屏；
+// 老系统没有这个属性就什么都不做（窗口底色仍在兜底）。
+static void gtasksSetWebviewBackground(void *window, int r, int g, int b) {
+	NSWindow *nsWindow = (NSWindow *)window;
+	if (nsWindow == nil) return;
+	dispatch_async(dispatch_get_main_queue(), ^{
+		@try {
+			id webView = gtasksFindWebview([nsWindow contentView]);
+			SEL setter = NSSelectorFromString(@"setUnderPageBackgroundColor:");
+			if (webView == nil || ![webView respondsToSelector:setter]) return;
+			NSColor *colour = [NSColor colorWithRed:r / 255.0 green:g / 255.0 blue:b / 255.0 alpha:1.0];
+			((void (*)(id, SEL, NSColor *))objc_msgSend)(webView, setter, colour);
+		} @catch (NSException *exception) {}
+	});
+}
+
 static void gtasksSetAppAppearance(const char *name) {
 	NSString *appearanceName = name == NULL ? nil : [NSString stringWithUTF8String:name];
 	dispatch_async(dispatch_get_main_queue(), ^{
@@ -65,6 +94,14 @@ func ApplyWindow(window unsafe.Pointer, mode Mode) {
 		return
 	}
 	C.gtasksSetWindowAppearance(window, appearanceName(mode))
+}
+
+// ApplyWebviewBackground 把 webview 的首屏底色设成 colour；window 为 nil 时忽略。
+func ApplyWebviewBackground(window unsafe.Pointer, colour RGB) {
+	if window == nil {
+		return
+	}
+	C.gtasksSetWebviewBackground(window, C.int(colour.R), C.int(colour.G), C.int(colour.B))
 }
 
 // SystemDark 报告系统当前是否深色外观。

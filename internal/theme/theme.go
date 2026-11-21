@@ -55,6 +55,36 @@ func EffectiveDark(mode Mode) bool {
 	}
 }
 
+// RGB 是窗口首屏底色。单独定义一个小结构，免得这个包去依赖具体 GUI 框架的
+// 颜色类型（Wails 的 application.RGBA 由调用方自己转）。
+type RGB struct {
+	R, G, B uint8
+}
+
+// PageBackground 是会话页（tasks.google.com）的首屏底色，取自 Google 网页版
+// 自己的浅色 #f8fafd 与深色 #1b1b1b：页面第一帧画出来之前 WebKit 涂的就是
+// 这个颜色，配错了会先闪一帧白屏。
+func PageBackground(dark bool) RGB {
+	if dark {
+		return RGB{R: 27, G: 27, B: 27}
+	}
+	return RGB{R: 248, G: 250, B: 253}
+}
+
+// AppBackground 是主窗口首屏底色，与 frontend/styles.css 的 --bg 一致。
+func AppBackground(dark bool) RGB {
+	if dark {
+		return RGB{R: 32, G: 33, B: 36}
+	}
+	return RGB{R: 255, G: 255, B: 255}
+}
+
+// WorkbenchBackground 是工作台窗口首屏底色，与 frontend/workbench.css 的
+// --bg 一致；工作台固定深色，不跟全局主题走。
+func WorkbenchBackground() RGB {
+	return RGB{R: 20, G: 22, B: 26}
+}
+
 // Manager 持有当前模式并广播变更。
 type Manager struct {
 	mu        sync.RWMutex

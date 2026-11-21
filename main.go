@@ -120,6 +120,8 @@ func main() {
 		},
 	})
 
+	startDark := theme.EffectiveDark(themeManager.Mode())
+
 	mainWindow := app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Name:      mainWindowName,
 		Title:     windowTitle,
@@ -128,6 +130,11 @@ func main() {
 		Height:    780,
 		MinWidth:  860,
 		MinHeight: 540,
+		// 首帧之前 webview 涂的就是这个颜色，深色模式下不再闪白屏。
+		BackgroundColour: rgbaOf(theme.AppBackground(startDark)),
+	})
+	applyWebviewBackgroundSoon(mainWindow, func() theme.RGB {
+		return theme.AppBackground(theme.EffectiveDark(themeManager.Mode()))
 	})
 
 	sessionOptions := application.WebviewWindowOptions{
@@ -144,6 +151,9 @@ func main() {
 		// Re-executed after every navigation, including the redirect chain
 		// through accounts.google.com and back.
 		JS: bridge.BootstrapJS,
+		// 会话页从导航到 Google 首屏渲染完有 1~3 秒空档，底色跟主题走，
+		// 页面侧再由 bootstrap 盖一层同色的启动遮罩。
+		BackgroundColour: rgbaOf(theme.PageBackground(startDark)),
 	}
 	if runtime.GOOS == "windows" {
 		// The Windows backend never applies WebviewWindowOptions.JS to a window
@@ -153,6 +163,9 @@ func main() {
 		sessionOptions.HTML = bridge.RedirectHTML(googleTasksURL)
 	}
 	sessionWindow := app.Window.NewWithOptions(sessionOptions)
+	applyWebviewBackgroundSoon(sessionWindow, func() theme.RGB {
+		return theme.PageBackground(theme.EffectiveDark(themeManager.Mode()))
+	})
 	sessionBridge.Bind(sessionWindow)
 	apiHandler.BindWindows(mainWindow, sessionWindow)
 
@@ -186,6 +199,8 @@ func main() {
 			Height:    820,
 			MinWidth:  900,
 			MinHeight: 560,
+			// 工作台固定深色，底色跟 workbench.css 的 --bg 一致。
+			BackgroundColour: rgbaOf(theme.WorkbenchBackground()),
 			Mac: application.MacWindow{
 				// 工作台是逆向工具，固定深色；不跟全局主题走，避免浅色模式下
 				// 标题栏和内容区一个白一个黑。
@@ -193,6 +208,7 @@ func main() {
 			},
 		})
 		storeWindow(workbenchName, win)
+		applyWebviewBackgroundSoon(win, func() theme.RGB { return theme.WorkbenchBackground() })
 		win.OnWindowEvent(events.Common.WindowClosing, func(*application.WindowEvent) {
 			storeWindow(workbenchName, nil)
 		})
@@ -219,36 +235,30 @@ func main() {
 		themePicker.open(lookupWindow(mainWindowName), mainWindowName, themeManager.Mode(), x, y)
 	})
 
-	// 主题切换后把模式推给三个窗口：主窗口和工作台改自己的 data-theme，
-	// 会话页面只刷新注入的主题按钮图标（页面配色跟原生外观走）。
-	var themeMu sync.Mutex
-	lastDark := theme.EffectiveDark(themeManager.Mode())
-	firstTheme := true
+	// 主题切换后把模式推给三个窗口：主窗口和工作台改自己的 data-theme，会话页
+	// 刷新注入的主题按钮图标。页面配色全靠 prefers-color-scheme 媒体查询驱动，
+	// 原生外观一变就会立刻重算，所以这里不再重载会话页——之前每次切主题都
+	// Reload 一次，白白卡上两三秒。媒体查询确实没跟上时，页面会回报
+	// reloadForTheme，由下面那个命令兜底重载。
 	themeManager.OnChange(func(mode theme.Mode) {
 		script := fmt.Sprintf("window.__gtasksTheme&&window.__gtasksTheme(%q);", string(mode))
 		mainWindow.ExecJS(script)
 		if workbench := lookupWindow(workbenchName); workbench != nil {
 			workbench.ExecJS(script)
 		}
-		sessionWindow.ExecJS(fmt.Sprintf("window.__gtask&&window.__gtask.setThemeMode(%q);", string(mode)))
+		dark := theme.EffectiveDark(mode)
+		sessionWindow.ExecJS(fmt.Sprintf("window.__gtask&&window.__gtask.setThemeMode(%q,%t);", string(mode), dark))
 
 		// 标题栏跟内容一起变；工作台固定深色，不参与。
 		for _, win := range []*application.WebviewWindow{mainWindow, sessionWindow} {
 			theme.ApplyWindow(win.NativeWindow(), mode)
 		}
-
-		// Google 的页面只在加载时读 prefers-color-scheme，实际深浅变了就
-		// 重载一次会话页，否则页面会停留在旧配色。
-		dark := theme.EffectiveDark(mode)
-		themeMu.Lock()
-		changed := !firstTheme && dark != lastDark
-		lastDark, firstTheme = dark, false
-		themeMu.Unlock()
-		if changed {
-			sessionWindow.Reload()
-		}
+		// webview 底色跟着换，之后万一真要重载也不会闪白屏。
+		theme.ApplyWebviewBackground(mainWindow.NativeWindow(), theme.AppBackground(dark))
+		theme.ApplyWebviewBackground(sessionWindow.NativeWindow(), theme.PageBackground(dark))
 	})
 
+	var lastThemeReload time.Time
 	sessionBridge.SetCommandHandler(func(name string, args map[string]any) {
 		switch name {
 		case "openWorkbench":
@@ -256,6 +266,13 @@ func main() {
 		case "openThemeMenu":
 			x, y := commandPoint(args)
 			themePicker.open(sessionWindow, sessionWindowName, themeManager.Mode(), x, y)
+		case "reloadForTheme":
+			// 页面报告 prefers-color-scheme 没跟上原生外观（个别 WebView 版本
+			// 不同步窗口外观）才走到这里；限流防止页面反复回报时无限重载。
+			if time.Since(lastThemeReload) > 10*time.Second {
+				lastThemeReload = time.Now()
+				sessionWindow.Reload()
+			}
 		case "contextMenu":
 			x, y := commandPoint(args)
 			sessionWindow.OpenContextMenu(&application.ContextMenuData{
@@ -269,7 +286,9 @@ func main() {
 
 	// 页面每次加载完都会 announce 一次，趁机把当前主题补进注入的按钮。
 	sessionBridge.SetReadyHandler(func(json.RawMessage) {
-		sessionWindow.ExecJS(fmt.Sprintf("window.__gtask&&window.__gtask.setThemeMode(%q);", string(themeManager.Mode())))
+		mode := themeManager.Mode()
+		sessionWindow.ExecJS(fmt.Sprintf("window.__gtask&&window.__gtask.setThemeMode(%q,%t);",
+			string(mode), theme.EffectiveDark(mode)))
 	})
 
 	// Show the login window only while it is actually needed.
@@ -439,6 +458,26 @@ func (t *themeMenu) open(win *application.WebviewWindow, windowName string, mode
 		Y:    y,
 		Data: windowName,
 	})
+}
+
+// rgbaOf 把主题底色转成 Wails 的颜色类型。
+func rgbaOf(colour theme.RGB) application.RGBA {
+	return application.RGBA{Red: colour.R, Green: colour.G, Blue: colour.B, Alpha: 255}
+}
+
+// applyWebviewBackgroundSoon 等窗口真正建出来再涂 webview 底色。Wails 要到
+// app.Run() 之后才创建原生窗口，之前 NativeWindow() 一直是 nil，而底色必须
+// 赶在页面第一帧之前生效，所以这里短轮询等句柄（最多 3 秒）。
+func applyWebviewBackgroundSoon(win *application.WebviewWindow, colour func() theme.RGB) {
+	go func() {
+		for attempt := 0; attempt < 300; attempt++ {
+			if handle := win.NativeWindow(); handle != nil {
+				theme.ApplyWebviewBackground(handle, colour())
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}()
 }
 
 // themePath 是全局外观模式的持久化位置。

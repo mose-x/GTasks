@@ -128,6 +128,12 @@ async function refreshSession() {
 
 // 网页端切换清单、已加星标、展开已完成时都不再发请求：全部视图都由一次
 // snapshot 返回的数据在本地渲染。这里也一样，一次 /api/tasks 就够整份界面。
+// 冷启动时会话页可能还在加载（bootstrap 尚未注入 / 正在跳转登录），这类错误
+// 自己会好，重试几次即可，不必一上来就甩个红色横幅。
+const SESSION_WARMING_UP = /引导脚本|页面未响应|尚未登录|正在加载|正在导航/;
+const WARMUP_RETRIES = 20;
+let warmupAttempts = 0;
+
 async function loadData() {
   if (store.demo) {
     seedDemo();
@@ -145,6 +151,7 @@ async function loadData() {
     if (!store.lists.some((list) => list.id === store.activeListId) && !isVirtual(store.activeListId)) {
       store.activeListId = VIRTUAL_ALL;
     }
+    warmupAttempts = 0;
     if (store.expired) expiredBanner();
     else hideBanner();
     renderAll();
@@ -152,6 +159,12 @@ async function loadData() {
     store.lists = [];
     store.tasks = [];
     renderAll();
+    if (SESSION_WARMING_UP.test(error.message || "") && warmupAttempts < WARMUP_RETRIES) {
+      warmupAttempts += 1;
+      showBanner("正在连接 Google 会话…");
+      setTimeout(loadData, 900);
+      return;
+    }
     showBanner(`读取失败：${error.message}`, [
       { label: "重试", onClick: () => loadData() },
       { label: "打开登录窗口", onClick: () => api("/api/session", { method: "POST", body: { action: "show" } }).catch(() => {}) },

@@ -4,6 +4,17 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>GTasks</title>
+  <script>
+    // 抢在第一帧之前把 data-theme 挂上：Go 侧才是主题的事实来源，这里先用
+    // localStorage 的缓存值上色，app.js 拿到 /api/theme 再校正，深色模式下
+    // 就不会先闪一帧白底。
+    (function () {
+      var mode = "system";
+      try { mode = localStorage.getItem("gtasks-theme") || "system"; } catch (error) {}
+      var dark = mode === "dark" || (mode === "system" && matchMedia("(prefers-color-scheme: dark)").matches);
+      document.documentElement.dataset.theme = dark ? "dark" : "light";
+    })();
+  </script>
   <script type="module" src="/wails/runtime.js"></script>
   <link rel="stylesheet" href="/styles.css" />
 </head>

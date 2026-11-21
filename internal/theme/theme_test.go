@@ -58,3 +58,21 @@ func TestParseAndNext(t *testing.T) {
 		t.Fatal("循环顺序应为 明亮 → 暗黑 → 跟随系统")
 	}
 }
+
+func TestBackgroundsMatchFrontend(t *testing.T) {
+	if got := PageBackground(true); got != (RGB{R: 27, G: 27, B: 27}) {
+		t.Fatalf("会话页深色底色应为 #1b1b1b，实际 %+v", got)
+	}
+	if got := PageBackground(false); got != (RGB{R: 248, G: 250, B: 253}) {
+		t.Fatalf("会话页浅色底色应为 #f8fafd，实际 %+v", got)
+	}
+	if got := AppBackground(true); got != (RGB{R: 32, G: 33, B: 36}) {
+		t.Fatalf("主窗口深色底色应与 styles.css 的 --bg 一致，实际 %+v", got)
+	}
+	if got := AppBackground(false); got != (RGB{R: 255, G: 255, B: 255}) {
+		t.Fatalf("主窗口浅色底色应为纯白，实际 %+v", got)
+	}
+	if got := WorkbenchBackground(); got != (RGB{R: 20, G: 22, B: 26}) {
+		t.Fatalf("工作台底色应与 workbench.css 的 --bg 一致，实际 %+v", got)
+	}
+}

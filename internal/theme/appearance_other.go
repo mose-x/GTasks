@@ -14,3 +14,7 @@ func ApplyWindow(window unsafe.Pointer, mode Mode) {}
 // SystemDark 在非 macOS 平台无法可靠探测，统一按浅色处理；跟随系统时各前端
 // 用自己的 prefers-color-scheme 媒体查询兜底。
 func SystemDark() bool { return false }
+
+// ApplyWebviewBackground 在非 macOS 平台无操作：窗口底色由 Wails 的
+// BackgroundColour 选项负责。
+func ApplyWebviewBackground(window unsafe.Pointer, colour RGB) {}
