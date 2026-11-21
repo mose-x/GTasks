@@ -22,8 +22,11 @@ esac
 
 mkdir -p "$OUT/Contents/MacOS" "$OUT/Contents/Resources"
 
+# -tags production 是 Wails 的发布标签：剔掉只在开发期有用的代码路径（前端 dev
+# server 反向代理、devtools 菜单项、内置 index.html 兜底页），发布产物不该带着它们。
+# 本地 `make build` / `make run` 仍然是 dev 构建，保留启动日志与 devtools 便于排查。
 GOPROXY="${GOPROXY:-https://goproxy.cn,direct}" \
-  go build -trimpath -ldflags "-X main.version=${VERSION}" \
+  go build -tags production -trimpath -ldflags "-X main.version=${VERSION}" \
   -o "$OUT/Contents/MacOS/gtasks" .
 
 cp build/macos/GTasks.icns "$OUT/Contents/Resources/GTasks.icns"

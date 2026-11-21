@@ -27,8 +27,9 @@ esac
 mkdir -p build/bin
 ASSET_NAME="gtasks-${VERSION}-windows-${ASSET_ARCH}.exe"
 
+# -tags production：Wails 发布标签，剔掉 dev server 代理 / devtools 等开发期代码路径。
 GOOS=windows GOARCH="$ARCH" CGO_ENABLED=0 \
-  go build -trimpath -ldflags "-X main.version=${VERSION}" -o "build/bin/${ASSET_NAME}" .
+  go build -tags production -trimpath -ldflags "-X main.version=${VERSION}" -o "build/bin/${ASSET_NAME}" .
 
 echo
 echo "已产出:"
