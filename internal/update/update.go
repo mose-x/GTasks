@@ -310,7 +310,9 @@ func (u *Updater) Download() error {
 	}
 	payload := f.Name()
 
-	client := &http.Client{Timeout: 10 * time.Minute}
+	// 下载不设整体超时：资产十几兆，慢线路（直连 CDN 几十 KB/s）下整体超时
+	// 必然在收尾前掐断；卡死由 TCP 层自己报错兜底。
+	client := &http.Client{}
 	resp, err := client.Get(info.DownloadURL)
 	if err != nil {
 		f.Close()
