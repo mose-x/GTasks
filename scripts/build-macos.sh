@@ -6,7 +6,8 @@
 #   架构:   amd64 | arm64（默认取本机 GOARCH）
 #
 # 产物（build/bin/）:
-#   gtasks-<ver>-macos-<x64|arm64>.dmg
+#   gtasks-<ver>-macos-<x64|arm64>.dmg   首装安装包
+#   gtasks-<ver>-macos-<x64|arm64>.bin   自升级裸二进制（internal/update 原地替换用）
 #
 # 依赖: Go 1.26+、Xcode Command Line Tools（cgo）、hdiutil（macOS 自带）。
 # 只能在 macOS 上跑；另一个架构可以交叉编译（GOARCH 交给 Xcode 的 clang -arch）。
@@ -71,6 +72,11 @@ GTasks 没有做代码签名（见 README 的 MDM / Gatekeeper 一节）。
 TXT
 ln -s /Applications "$STAGING/Applications"
 
+# --- 自升级资产：裸二进制。internal/update 的 matchPlatformAsset 在 darwin 上
+# 只认 .bin（.dmg 是安装包，原地替换不了），命名必须保持 gtasks-<ver>-macos-<arch>.bin。
+BIN_NAME="gtasks-${VERSION}-macos-${ASSET_ARCH}.bin"
+cp "$STAGING/GTasks.app/Contents/MacOS/gtasks" "build/bin/${BIN_NAME}"
+
 hdiutil create -volname "GTasks" -srcfolder "$STAGING" -ov -format UDZO \
   -imagekey zlib-level=9 "build/bin/${DMG_NAME}" >/dev/null
 
@@ -82,3 +88,4 @@ xattr -w com.apple.quarantine "0083;00000000;GTasks;|gtasks" "build/bin/${DMG_NA
 echo
 echo "已产出:"
 echo "  build/bin/${DMG_NAME}"
+echo "  build/bin/${BIN_NAME}"
