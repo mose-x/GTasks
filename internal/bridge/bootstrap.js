@@ -826,6 +826,7 @@
     var style = document.createElement("style");
     style.id = "gtasks-ui-style";
     style.textContent = [
+      "@keyframes gtasks-dialog-spin { to { transform: rotate(360deg); } }",
       // 「Google 应用」九宫格对桌面客户端没有意义，直接藏掉。
       'a.gb_C[aria-label*="Google 应用"], a.gb_C[aria-label*="Google apps"], a.gb_C[href*="/about/products"] { display: none !important; }',
       ".gtasks-hbtn { width: 40px; height: 40px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; color: inherit; }",
@@ -1077,6 +1078,39 @@
       menu.appendChild(item);
     }
     relabelAsWorkbench(item, menu);
+    appendSupportItems(menu);
+  }
+
+  // 「检查更新 / 关于」两项克隆工作台那枚改造过的 Google li：cloneNode 不带
+  // JS 监听器，click 自己补，样式 / 行高 / hover 全沿用 Google 的状态类。
+  function appendSupportItems(menu) {
+    if (menu.querySelector("[data-gtasks-about]")) return;
+    var source = menu.querySelector("[data-gtasks-workbench]");
+    if (!source) return;
+    addSupportItem(menu, source, "data-gtasks-update", tt("menu.checkUpdate", "检查更新…"), function () {
+      uiCommand("checkUpdate");
+    });
+    addSupportItem(menu, source, "data-gtasks-about", tt("menu.about", "关于 GTasks"), function () {
+      uiCommand("about");
+    });
+  }
+
+  function addSupportItem(menu, source, attr, label, onClick) {
+    var node = source.cloneNode(true);
+    node.removeAttribute("data-gtasks-workbench");
+    node.setAttribute(attr, "1");
+    node.setAttribute("aria-label", label);
+    node.setAttribute("title", label);
+    var text = node.querySelector(".aqdrmf-rymPhb-fpDzbe-fmcmS");
+    if (text) text.textContent = label;
+    else node.textContent = label;
+    node.addEventListener("click", function (event) {
+      event.stopPropagation();
+      event.preventDefault();
+      closeMenu(menu);
+      onClick();
+    });
+    menu.appendChild(node);
   }
 
   // 内容区的「列表选项」按钮和清单标题在同一个 section 里，标题 id 就是
@@ -1485,6 +1519,323 @@
     }
     watchSplash();
   }
+
+  // ---------------------------------------------------------- 关于 / 升级对话框
+  //
+  // 升级流程的事件由 Go 侧 internal/update 推过来（window.__gtask.updateEvent），
+  // 页面只负责按 stage 渲染：检查 → 有新版（changelog + 立即更新）→ 下载进度 →
+  // 校验 → 重启安装；失败给原文 + 重试。文案全走词表，Stage 键与 Go 常量对齐。
+  var DIALOG_ID = "gtasks-dialog";
+
+  function dialogDark() {
+    return splashDark();
+  }
+
+  function dialogColors() {
+    return dialogDark()
+      ? {
+          overlay: "rgba(0,0,0,.5)",
+          card: "#2a2b2e",
+          fg: "#e8eaed",
+          sub: "#9aa0a6",
+          accent: "#8ab4f8",
+          line: "#3c4043",
+          track: "#3c4043",
+        }
+      : {
+          overlay: "rgba(32,33,36,.32)",
+          card: "#ffffff",
+          fg: "#202124",
+          sub: "#5f6368",
+          accent: "#1a73e8",
+          line: "#dadce0",
+          track: "#e8eaed",
+        };
+  }
+
+  function esc(text) {
+    return String(text == null ? "" : text).replace(/[&<>"']/g, function (ch) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch];
+    });
+  }
+
+  function closeDialog() {
+    var node = document.getElementById(DIALOG_ID);
+    if (node && node.parentNode) node.parentNode.removeChild(node);
+  }
+
+  // openDialog({title, body, buttons})：buttons 为 [{label, primary, onClick}]。
+  function openDialog(opts) {
+    var c = dialogColors();
+    var node = document.getElementById(DIALOG_ID);
+    if (!node) {
+      node = document.createElement("div");
+      node.id = DIALOG_ID;
+      (document.body || document.documentElement).appendChild(node);
+    }
+    node.setAttribute(
+      "style",
+      [
+        "position:fixed",
+        "left:0",
+        "top:0",
+        "right:0",
+        "bottom:0",
+        "z-index:2147482900",
+        "display:flex",
+        "align-items:center",
+        "justify-content:center",
+        "background:" + c.overlay,
+        "font:14px/1.55 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'PingFang SC','Microsoft YaHei',sans-serif",
+      ].join(";"),
+    );
+    var buttons = (opts.buttons || [])
+      .map(function (btn, index) {
+        return (
+          '<button data-gtasks-dialog-btn="' +
+          index +
+          '" style="' +
+          [
+            "padding:7px 16px",
+            "border-radius:8px",
+            "cursor:pointer",
+            "font:inherit",
+            btn.primary
+              ? "border:none;background:" + c.accent + ";color:" + (dialogDark() ? "#202124" : "#ffffff")
+              : "border:1px solid " + c.line + ";background:transparent;color:" + c.fg,
+          ].join(";") +
+          '">' +
+          esc(btn.label) +
+          "</button>"
+        );
+      })
+      .join("");
+    node.innerHTML =
+      '<div style="width:440px;max-width:calc(100vw - 48px);max-height:calc(100vh - 96px);display:flex;flex-direction:column;' +
+      "background:" +
+      c.card +
+      ";color:" +
+      c.fg +
+      ";border:1px solid " +
+      c.line +
+      ";border-radius:14px;" +
+      'box-shadow:0 18px 48px rgba(0,0,0,.35);overflow:hidden">' +
+      '<div style="padding:18px 20px 10px;font-size:15px;font-weight:600">' +
+      esc(opts.title) +
+      "</div>" +
+      '<div data-gtasks-dialog-body style="padding:4px 20px 14px;overflow:auto;color:' +
+      c.fg +
+      '">' +
+      (opts.body || "") +
+      "</div>" +
+      '<div style="display:flex;justify-content:flex-end;gap:10px;padding:12px 20px 16px;border-top:1px solid ' +
+      c.line +
+      '">' +
+      buttons +
+      "</div>" +
+      "</div>";
+    var handlers = opts.buttons || [];
+    var nodes = node.querySelectorAll("[data-gtasks-dialog-btn]");
+    for (var index = 0; index < nodes.length; index++) {
+      (function (el, btn) {
+        el.addEventListener("click", function (event) {
+          event.stopPropagation();
+          btn.onClick();
+        });
+      })(nodes[index], handlers[index]);
+    }
+    return node;
+  }
+
+  function dialogRow(label, value) {
+    var c = dialogColors();
+    return (
+      '<div style="display:flex;gap:10px;padding:3px 0"><span style="color:' +
+      c.sub +
+      ';min-width:52px">' +
+      esc(label) +
+      '</span><span style="word-break:break-all">' +
+      esc(value) +
+      "</span></div>"
+    );
+  }
+
+  function spinner() {
+    var c = dialogColors();
+    return (
+      '<span style="display:inline-block;width:14px;height:14px;border-radius:50%;border:2px solid ' +
+      c.accent +
+      ';border-top-color:transparent;animation:gtasks-dialog-spin .8s linear infinite;vertical-align:-2px;margin-right:8px"</span>'
+    );
+  }
+
+  function progressBar(percent) {
+    var c = dialogColors();
+    return (
+      '<div style="height:6px;border-radius:3px;background:' +
+      c.track +
+      ';overflow:hidden;margin:10px 0 6px"><div style="height:100%;width:' +
+      Math.max(0, Math.min(100, percent || 0)) +
+      "%;background:" +
+      c.accent +
+      ';transition:width .2s ease"></div></div>'
+    );
+  }
+
+  api.showAbout = function (info) {
+    info = info || {};
+    openDialog({
+      title: tt("about.title", "关于 GTasks"),
+      body:
+        dialogRow(tt("about.versionLabel", "版本"), info.version || "") +
+        dialogRow(tt("about.licenseLabel", "协议"), info.license || "") +
+        dialogRow(tt("about.repoLabel", "仓库"), info.repoUrl || ""),
+      buttons: [
+        { label: tt("about.close", "关闭"), onClick: closeDialog },
+        {
+          label: tt("about.checkUpdate", "检查更新"),
+          primary: true,
+          onClick: function () {
+            uiCommand("checkUpdate");
+          },
+        },
+      ],
+    });
+  };
+
+  // 最近一次检查结论：下载 / 校验阶段的事件不带 info，对话框还要显示版本号。
+  var updateLastInfo = null;
+
+  api.updateEvent = function (ev) {
+    if (!ev || !ev.stage) return;
+    if (ev.info) updateLastInfo = ev.info;
+    var c = dialogColors();
+    var info = ev.info || updateLastInfo || {};
+    var sub = function (key, fallback, params) {
+      return '<div style="color:' + c.sub + ';padding:2px 0">' + esc(tt(key, fallback, params)) + "</div>";
+    };
+    var changelog = function () {
+      if (!info.changelog) return "";
+      return (
+        '<pre style="margin:10px 0 0;padding:10px;border-radius:8px;background:' +
+        (dialogDark() ? "#202124" : "#f1f3f4") +
+        ";color:" +
+        c.sub +
+        ';white-space:pre-wrap;max-height:180px;overflow:auto;font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace">' +
+        esc(info.changelog) +
+        "</pre>"
+      );
+    };
+    var closeBtn = { label: tt("update.close", "关闭"), onClick: closeDialog };
+    var retryBtn = {
+      label: tt("update.retry", "重试"),
+      primary: true,
+      onClick: function () {
+        uiCommand("checkUpdate");
+      },
+    };
+
+    if (ev.stage === "checking") {
+      openDialog({
+        title: tt("update.title", "检查更新"),
+        body: sub("update.checking", "正在检查更新…"),
+        buttons: [],
+      });
+      return;
+    }
+    if (ev.stage === "available") {
+      openDialog({
+        title: tt("update.availableTitle", "发现新版本 {version}", { version: info.latestVersion || "" }),
+        body:
+          sub("update.availableBody", "当前 {current} → 最新 {latest}", {
+            current: window.__gtasksVersion || "",
+            latest: info.latestVersion || "",
+          }) + changelog(),
+        buttons: [
+          closeBtn,
+          {
+            label: tt("update.now", "立即更新"),
+            primary: true,
+            onClick: function () {
+              uiCommand("downloadUpdate");
+            },
+          },
+        ],
+      });
+      return;
+    }
+    if (ev.stage === "downloading") {
+      openDialog({
+        title: tt("update.title", "检查更新"),
+        body: progressBar(ev.percent) + sub("update.downloading", "正在下载… {message}", { message: ev.message || "" }),
+        buttons: [],
+      });
+      return;
+    }
+    if (ev.stage === "verifying") {
+      openDialog({
+        title: tt("update.title", "检查更新"),
+        body: sub("update.verifying", "校验完整性…"),
+        buttons: [],
+      });
+      return;
+    }
+    if (ev.stage === "downloaded") {
+      openDialog({
+        title: tt("update.downloadedTitle", "下载完成"),
+        body: sub("update.downloaded", "新版本 {version} 已下载，重启后生效。", { version: info.latestVersion || "" }),
+        buttons: [
+          closeBtn,
+          {
+            label: tt("update.apply", "重启并安装"),
+            primary: true,
+            onClick: function () {
+              uiCommand("applyUpdate");
+            },
+          },
+        ],
+      });
+      return;
+    }
+    if (ev.stage === "applying") {
+      openDialog({
+        title: tt("update.applyingTitle", "正在安装"),
+        body: spinner() + esc(tt("update.applying", "替换二进制并重启，窗口马上关闭…")),
+        buttons: [],
+      });
+      return;
+    }
+    if (ev.stage === "uptodate") {
+      openDialog({
+        title: tt("update.uptodateTitle", "已是最新"),
+        body: sub("update.uptodate", "当前 {version} 已是最新稳定版。", {
+          version: info.latestVersion || window.__gtasksVersion || "",
+        }),
+        buttons: [closeBtn],
+      });
+      // 自动关闭只认自己这一个实例：2.6 秒内用户又点开别的对话框就不动它。
+      var self = document.getElementById(DIALOG_ID);
+      setTimeout(function () {
+        if (document.getElementById(DIALOG_ID) === self) closeDialog();
+      }, 2600);
+      return;
+    }
+    if (ev.stage === "error") {
+      openDialog({
+        title: tt("update.errorTitle", "更新失败"),
+        body:
+          sub("update.errorBody", "升级流程中断，可重试或稍后再试。") +
+          '<pre style="margin:8px 0 0;padding:10px;border-radius:8px;background:' +
+          (dialogDark() ? "#202124" : "#f1f3f4") +
+          ";color:" +
+          c.sub +
+          ';white-space:pre-wrap;max-height:140px;overflow:auto;font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace">' +
+          esc(ev.message || "") +
+          "</pre>",
+        buttons: [closeBtn, retryBtn],
+      });
+    }
+  };
 
   function installUI() {
     if (!uiAvailable() || location.hostname !== "tasks.google.com") return;
