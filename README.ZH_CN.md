@@ -300,6 +300,18 @@ batchexecute 调用，参数是 `text/template` 模板。目前 `snapshot` 走�
 `build/macos-bundle.sh` 组装 `GTasks.app`（Info.plist + icns + 主程序）。
 **`CFBundleIdentifier` 固定为 `gtasks`**：WebKit 的 cookie / localStorage 按它隔离，改了要重新登录。
 
+## 自升级
+
+主窗口「?」菜单里多了两项：**检查更新…** 与 **关于 GTasks**。升级策略与 SVC 项目一致：
+
+- **来源**：本仓库的 GitHub Releases 列表；只认纯 `vX.Y.Z` 的 tag，rc/beta 永远不会推给用户。
+- **资产**：各平台裸二进制 —— `gtasks-<ver>-macos-<arch>.bin`、`gtasks-<ver>-linux-<arch>`、`gtasks-<ver>-windows-<arch>.exe`（dmg / 安装包 / deb / rpm 只用于首装），下载后按 release 的 `sha256sums.txt` 校验完整性。
+- **应用**：新包先落临时文件；后台脚本等进程退出后把运行中的二进制改名 `<exe>.bak`、把新包原子上位、拷贝后再比一次 SHA256（不一致就回滚 `.bak`）、同步 macOS bundle 的 `CFBundleShortVersionString` / `CFBundleVersion`，最后重新拉起。
+- **回滚**：旧二进制以 `<exe>.bak` 留在现二进制旁边；`POST /api/update {"action":"rollback"}` 走同一套「等退出再替换」脚本还原。
+- **脚本化**：`GET /api/update` 回报最近一次检查与备份状态；`POST /api/update` 接受 `check|download|apply|rollback`，全流程可以用 curl 驱动。
+
+macOS 注意：bundle 故意不签名（见上文 MDM / Gatekeeper 一节）。自升级后 quarantine 属性仍在 `.app` 上，Gatekeeper 可能再要一次「右键 → 打开」确认；不要对它执行 `xattr -cr`。
+
 ## 构建与运行
 
 仓库：<https://github.com/mose-x/GTasks.git>

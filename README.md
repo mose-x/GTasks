@@ -354,6 +354,18 @@ packs it with `iconutil`; `build/macos-bundle.sh` assembles `GTasks.app`
 (Info.plist + icns + binary). **`CFBundleIdentifier` is pinned to `gtasks`**: WebKit
 isolates cookies / localStorage by that value, so changing it forces a re-login.
 
+## Self-update
+
+The "?" menu in the main window carries two extra entries: **Check for updates…** and **About GTasks**. The updater follows the same strategy as the SVC project:
+
+- **Source**: the GitHub Releases list of this repo; only pure `vX.Y.Z` tags count, so rc/beta builds never reach users.
+- **Assets**: per-platform bare binaries — `gtasks-<ver>-macos-<arch>.bin`, `gtasks-<ver>-linux-<arch>`, `gtasks-<ver>-windows-<arch>.exe` (dmg/installer/deb/rpm are first-install only). Integrity is verified against the release's `sha256sums.txt`.
+- **Apply**: the payload lands in a temp file first; a background script then waits for the app to exit, renames the running binary to `<exe>.bak`, moves the payload into place, re-checks the SHA256 after the copy (rolling back to `.bak` on mismatch), syncs `CFBundleShortVersionString` / `CFBundleVersion` inside the macOS bundle, and relaunches.
+- **Rollback**: the previous binary stays next to the current one as `<exe>.bak`; `POST /api/update {"action":"rollback"}` restores it through the same wait-and-swap script.
+- **Scripting**: `GET /api/update` reports the last check and backup state; `POST /api/update` accepts `check|download|apply|rollback`, so the whole flow is drivable with curl.
+
+macOS note: the bundle is deliberately unsigned (see the MDM / Gatekeeper section). The quarantine attribute stays on the `.app` after a self-update, so Gatekeeper may ask for the one-time right-click → Open confirmation again. Do not `xattr -cr` it.
+
 ## Build & run
 
 Repository: <https://github.com/mose-x/GTasks.git>
