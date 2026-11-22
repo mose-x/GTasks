@@ -30,6 +30,7 @@ import (
 	"gtasks/internal/session"
 	"gtasks/internal/tasks"
 	"gtasks/internal/theme"
+	"gtasks/internal/update"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
@@ -113,7 +114,39 @@ func main() {
 	// server mounts, so the discovery workflow can be scripted with curl
 	// instead of clicking through the workbench. Binding strictly to loopback
 	// keeps it in the same trust domain as the local cookie store.
-	controlServer := startControlServer(apiHandler)
+	// 应用内自升级，策略参考 SVC：GitHub Releases 稳定版 + 平台裸资产 +
+	// sha256 校验 + 退出后脚本替换。事件要推给主窗口的注入对话框，但窗口此刻
+	// 还没建，推送 / 退出都先走占位闭包，窗口与 app 就绪后再填真身。
+	var updateBridgeMu sync.Mutex
+	var updatePush func(update.Event)
+	var updateQuit func()
+	// GTASKS_UPDATE_URL 只给本地端到端验证用：指向一个 mock 的 releases
+	// 列表就能不碰真仓库跑通检查 / 下载 / 替换全流程。
+	updateURL := "https://api.github.com/repos/mose-x/GTasks/releases/latest"
+	if env := os.Getenv("GTASKS_UPDATE_URL"); env != "" {
+		updateURL = env
+	}
+	updater := update.NewUpdater(update.AppInfo{
+		Version:   version,
+		License:   "MIT License",
+		RepoURL:   "https://github.com/mose-x/GTasks",
+		UpdateURL: updateURL,
+	}, func(ev update.Event) {
+		updateBridgeMu.Lock()
+		push := updatePush
+		updateBridgeMu.Unlock()
+		if push != nil {
+			push(ev)
+		}
+	}, func() {
+		updateBridgeMu.Lock()
+		quit := updateQuit
+		updateBridgeMu.Unlock()
+		if quit != nil {
+			quit()
+		}
+	})
+	controlServer := startControlServer(withUpdateRoutes(apiHandler, updater))
 
 	app := application.New(application.Options{
 		Name:        "GTasks",
@@ -170,6 +203,17 @@ func main() {
 	// Wails 在 macOS 上要等加载完成才跑 bootstrap，首帧到加载完成之间 Google
 	// 默认顶栏会露出来；补一个 document-start 用户脚本把这段也盖住。
 	appkit.AddDocumentStartScript(windowTitle, bridge.EarlyPaintJS)
+	// 升级事件 / 退出回调到这里才有真身：推给主窗口注入的对话框，退出走 app。
+	updateBridgeMu.Lock()
+	updatePush = func(ev update.Event) {
+		payload, err := json.Marshal(ev)
+		if err != nil {
+			return
+		}
+		mainWindow.ExecJS(fmt.Sprintf("window.__gtask&&window.__gtask.updateEvent(%s);", payload))
+	}
+	updateQuit = func() { app.Quit() }
+	updateBridgeMu.Unlock()
 	// 保存的主题要在原生句柄就绪后立刻补上：窗口刚建时原生外观跟着系统走，
 	// 不等句柄就设的话，「明亮 / 暗黑」首屏会先按系统外观闪一下。
 	applyWindowThemeSoon(mainWindow, themeManager.Mode)
@@ -334,6 +378,15 @@ func main() {
 				Y:    y,
 				Data: mainWindowName,
 			})
+		case "about":
+			payload, _ := json.Marshal(updater.Info())
+			mainWindow.ExecJS(fmt.Sprintf("window.__gtask&&window.__gtask.showAbout(%s);", payload))
+		case "checkUpdate":
+			go func() { _, _ = updater.Check() }()
+		case "downloadUpdate":
+			go func() { _ = updater.Download() }()
+		case "applyUpdate":
+			go func() { _ = updater.Apply() }()
 		}
 	})
 
@@ -342,6 +395,8 @@ func main() {
 		mode := themeManager.Mode()
 		mainWindow.ExecJS(fmt.Sprintf("window.__gtask&&window.__gtask.setThemeMode(%q,%t);",
 			string(mode), theme.EffectiveDark(mode)))
+		// 升级对话框要显示「当前版本」，页面加载完就把版本号推下去。
+		mainWindow.ExecJS(fmt.Sprintf("window.__gtasksVersion = %q;", version))
 		// 页面每次加载完都补一次词表，保证注入按钮的文案和当前语言同步。
 		mainWindow.ExecJS(fmt.Sprintf("window.__gtask&&window.__gtask.setI18n(%s);",
 			string(i18nManager.Payload())))
@@ -396,6 +451,59 @@ func main() {
 // startControlServer serves the API on 127.0.0.1 (override with GTASKS_API_ADDR,
 // use "" to disable). It returns nil when the port cannot be bound, which is
 // not fatal: the in-app windows keep working either way.
+// withUpdateRoutes 把自升级控制端点挂进控制面：/api/update 用 curl 就能脚本化
+// 检查 / 下载 / 应用 / 回滚全流程（验证脚本靠它），其余路径原样落回 apiHandler。
+func withUpdateRoutes(next http.Handler, updater *update.Updater) http.Handler {
+	mux := http.NewServeMux()
+	mux.Handle("/api/update", updateHandler(updater))
+	mux.Handle("/", next)
+	return mux
+}
+
+func updateHandler(updater *update.Updater) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.Method {
+		case http.MethodGet:
+			info, checked := updater.Latest()
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"app":       updater.Info(),
+				"checked":   checked,
+				"info":      info,
+				"hasBackup": updater.HasBackup(),
+			})
+		case http.MethodPost:
+			var body struct {
+				Action string `json:"action"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				w.WriteHeader(http.StatusBadRequest)
+				_ = json.NewEncoder(w).Encode(map[string]any{"error": err.Error()})
+				return
+			}
+			run := func(fn func() error) {
+				go func() { _ = fn() }()
+				_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
+			}
+			switch body.Action {
+			case "check":
+				run(func() error { _, err := updater.Check(); return err })
+			case "download":
+				run(updater.Download)
+			case "apply":
+				run(updater.Apply)
+			case "rollback":
+				run(updater.Rollback)
+			default:
+				w.WriteHeader(http.StatusBadRequest)
+				_ = json.NewEncoder(w).Encode(map[string]any{"error": "unknown action"})
+			}
+		default:
+			w.WriteHeader(http.StatusMethodNotAllowed)
+		}
+	})
+}
+
 func startControlServer(handler http.Handler) *http.Server {
 	addr := os.Getenv("GTASKS_API_ADDR")
 	if addr == "" {
