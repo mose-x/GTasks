@@ -827,8 +827,9 @@
     style.id = "gtasks-ui-style";
     style.textContent = [
       "@keyframes gtasks-dialog-spin { to { transform: rotate(360deg); } }",
-      // 「Google 应用」九宫格对桌面客户端没有意义，直接藏掉。
-      'a.gb_C[aria-label*="Google 应用"], a.gb_C[aria-label*="Google apps"], a.gb_C[href*="/about/products"] { display: none !important; }',
+      // 「Google 应用」九宫格对桌面客户端没有意义，直接藏掉。不绑类名也不绑标签：
+      // 水合前的旧类名 / 账号域的非 a 节点都要盖住，与 earlypaint.js 同一条规则。
+      '[aria-label*="Google 应用"], [aria-label*="Google apps"], a[href*="/about/products"] { display: none !important; }',
       ".gtasks-hbtn { width: 40px; height: 40px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; color: inherit; }",
       ".gtasks-hbtn:hover, .gtasks-hbtn:focus { background: rgba(128,134,139,.14); outline: none; }",
       // 主题 / 语言两颗按钮绝对定位在「?」右边的空档里。Google 那个行内容器里混着
