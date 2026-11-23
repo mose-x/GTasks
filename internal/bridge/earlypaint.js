@@ -8,10 +8,11 @@
 // bootstrap 看见遮罩已在就跳过自建，两段无缝衔接。
 (function () {
   "use strict";
-  if (location.hostname !== "tasks.google.com") return;
-  if (document.getElementById("gtasks-splash")) return;
+  if (document.getElementById("gtasks-splash-style")) return;
 
   var SPLASH_ID = "gtasks-splash";
+  var HIDE_APPS_GRID_RULE =
+    '[aria-label*="Google 应用"], [aria-label*="Google apps"], a[href*="/about/products"] { display: none !important; }';
   var TIMEOUT = 8000;
   var POLL = 90;
   var READY_SELECTOR = ".yVc39c, li[data-task-list-id], c-wiz";
@@ -52,12 +53,37 @@
     : { bg: "#f8fafd", fg: "#5f6368", accent: "#1a73e8" };
 
   // 九宫格隐藏规则与 bootstrap 的 installUIStyles 第一条保持一致：遮罩万一提前
-  // 退场，默认顶栏也不该露出桌面客户端用不到的入口。
-  var style = document.createElement("style");
-  style.id = SPLASH_ID + "-style";
-  style.textContent =
-    "@keyframes gtasks-splash-spin { to { transform: rotate(360deg); } }\n" +
-    'a.gb_C[aria-label*="Google 应用"], a.gb_C[aria-label*="Google apps"], a.gb_C[href*="/about/products"] { display: none !important; }';
+  // 退场，默认顶栏也不该露出桌面客户端用不到的入口。选择器不绑类名也不绑标签：
+  // tasks 页水合前可能是旧类名，账号域里九宫格甚至不是 a 节点，绑了就会漏。
+  // 登录链路会穿过 accounts / myaccount / ogs 等一堆域，九宫格在桌面客户端里
+  // 任何域都没用，所以隐藏规则不做域白名单：document-start 一律先盖上。
+  var STYLE_TEXT = "@keyframes gtasks-splash-spin { to { transform: rotate(360deg); } }\n" + HIDE_APPS_GRID_RULE;
+
+  // Wiz 系页面（tasks / myaccount 都是）软导航时会整段重写 <head>，早遮罩的
+  // <style> 会被顺手带走，九宫格就在重写那一瞬露出来。这里做成「掉了就补」：
+  // 盯住 html 与 head 的子节点变化，样式不在就重新挂一份；bootstrap 的
+  // #gtasks-ui-style 落地后藏九宫格的规则有了长期归宿，就不再补了。
+  function ensureStyle() {
+    if (document.getElementById("gtasks-ui-style")) return;
+    var existing = document.getElementById(SPLASH_ID + "-style");
+    if (existing) {
+      if (existing.isConnected) return;
+      existing.parentNode.removeChild(existing);
+    }
+    var style = document.createElement("style");
+    style.id = SPLASH_ID + "-style";
+    style.textContent = STYLE_TEXT;
+    (document.head || document.documentElement).appendChild(style);
+  }
+
+  ensureStyle();
+  if (window.MutationObserver) {
+    var observer = new MutationObserver(function () {
+      ensureStyle();
+    });
+    observer.observe(document.documentElement, { childList: true });
+    if (document.head) observer.observe(document.head, { childList: true });
+  }
 
   var splash = document.createElement("div");
   splash.id = SPLASH_ID;
@@ -96,7 +122,8 @@
     splashText() +
     "</span></div>";
 
-  (document.head || document.documentElement).appendChild(style);
+  // 遮罩只盖 tasks 页：登录 / 账号域的表单被盖住就没法输密码了，那些域只藏九宫格。
+  if (location.hostname !== "tasks.google.com") return;
   (document.body || document.documentElement).appendChild(splash);
 
   function hide() {
