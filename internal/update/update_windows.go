@@ -11,6 +11,17 @@ import (
 	"time"
 )
 
+// DetectInstalled 看 exe 旁边有没有 NSIS 写下的 uninstall.exe：有就是安装版，
+// 直接双击裸 exe 的绿色版没有这个文件。
+func DetectInstalled() bool {
+	exe, err := os.Executable()
+	if err != nil {
+		return false
+	}
+	_, err = os.Stat(filepath.Join(filepath.Dir(exe), "uninstall.exe"))
+	return err == nil
+}
+
 func backupPath(currentExe string) string { return currentExe + ".bak" }
 
 func findBackupPath(currentExe string) string {

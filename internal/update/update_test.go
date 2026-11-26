@@ -218,6 +218,42 @@ func TestCheckFallsBackToWebWhenRateLimited(t *testing.T) {
 	}
 }
 
+func TestCheckFailureIsSilentForPortableRuns(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "boom", http.StatusBadGateway)
+	}))
+	defer server.Close()
+
+	var stages []string
+	u := NewUpdater(AppInfo{Version: "1.0.0", UpdateURL: server.URL + "/repos/o/r/releases/latest"}, func(ev Event) {
+		stages = append(stages, ev.Stage)
+	}, nil)
+	if _, err := u.Check(); err == nil {
+		t.Fatalf("Check should report the transport error")
+	}
+	if len(stages) != 1 || stages[0] != StageChecking {
+		t.Fatalf("portable run must stay silent after checking, got %v", stages)
+	}
+}
+
+func TestCheckFailureNotifiesInstalledRuns(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "boom", http.StatusBadGateway)
+	}))
+	defer server.Close()
+
+	var events []Event
+	u := NewUpdater(AppInfo{Version: "1.0.0", UpdateURL: server.URL + "/repos/o/r/releases/latest", Installed: true}, func(ev Event) {
+		events = append(events, ev)
+	}, nil)
+	if _, err := u.Check(); err == nil {
+		t.Fatalf("Check should report the transport error")
+	}
+	if len(events) != 2 || events[1].Stage != StageCheckFailed || events[1].Message == "" {
+		t.Fatalf("installed run should end with a checkfailed event, got %+v", events)
+	}
+}
+
 func TestCheckRateLimitedWithoutDerivableWebURL(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusTooManyRequests)
