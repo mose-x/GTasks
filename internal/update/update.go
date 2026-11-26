@@ -37,6 +37,9 @@ type AppInfo struct {
 	License   string `json:"license"`
 	RepoURL   string `json:"repoUrl"`
 	UpdateURL string `json:"updateUrl"`
+	// Installed 区分安装版与绿色版：检查失败的提示策略按它分流
+	//（安装版给友好弹窗 + 安装包指引，绿色版静默）。
+	Installed bool `json:"installed"`
 }
 
 // UpdateInfo 是一次检查的结论。
@@ -68,6 +71,9 @@ const (
 	StageApplying    = "applying"
 	StageDownloaded  = "downloaded"
 	StageError       = "error"
+	// StageCheckFailed 只用于「检查」这一步失败：文案走词表的友好提示，
+	// 不把 Go 的原始错误糊到用户脸上（原文只进日志）。
+	StageCheckFailed = "checkfailed"
 )
 
 // Updater 串起检查 / 下载 / 应用 / 回滚四步。emit 与 quit 由宿主注入：
@@ -118,8 +124,9 @@ func (u *Updater) end() {
 	u.mu.Unlock()
 }
 
-// Check 查询最新稳定版。网络不通 / 非 200 / 解析失败都返回 error，
-// 由调用方把原文展示给用户；「没有稳定版可升」不算错误。
+// Check 查询最新稳定版。网络不通 / 非 200 / 解析失败都返回 error；
+// 失败提示按安装形态分流（安装版友好弹窗、绿色版静默），原文只进日志。
+// 「没有稳定版可升」不算错误。
 func (u *Updater) Check() (UpdateInfo, error) {
 	if err := u.begin(); err != nil {
 		return UpdateInfo{}, err
@@ -128,7 +135,11 @@ func (u *Updater) Check() (UpdateInfo, error) {
 	u.send(Event{Stage: StageChecking})
 	info, err := u.check()
 	if err != nil {
-		u.send(Event{Stage: StageError, Message: err.Error()})
+		// 绿色版（直接打开裸 exe / 二进制）检查失败不打扰用户；安装版
+		// 才推一次友好提示，词表里带 release 页安装包的兜底指引。
+		if u.info.Installed {
+			u.send(Event{Stage: StageCheckFailed, Message: err.Error()})
+		}
 		return UpdateInfo{}, err
 	}
 	u.mu.Lock()

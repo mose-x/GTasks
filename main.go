@@ -131,6 +131,7 @@ func main() {
 		License:   "MIT License",
 		RepoURL:   "https://github.com/mose-x/GTasks",
 		UpdateURL: updateURL,
+		Installed: update.DetectInstalled(),
 	}, func(ev update.Event) {
 		updateBridgeMu.Lock()
 		push := updatePush

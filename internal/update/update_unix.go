@@ -7,9 +7,24 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 )
+
+// DetectInstalled 在非 Windows 上按安装位置粗判：macOS 看是否跑在 .app 包里，
+// Linux 看是否落在 /usr 或 /opt 的包管理路径下；其余当绿色版。
+func DetectInstalled() bool {
+	exe, err := os.Executable()
+	if err != nil {
+		return false
+	}
+	dir := filepath.Dir(exe)
+	if runtime.GOOS == "darwin" {
+		return strings.Contains(dir, ".app/")
+	}
+	return strings.HasPrefix(dir, "/usr/") || strings.HasPrefix(dir, "/opt/")
+}
 
 func backupPath(currentExe string) string { return currentExe + ".bak" }
 
