@@ -26,6 +26,10 @@ Unicode true
 !define UNINST_KEY        "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PRODUCT_NAME}"
 !define DATA_DIR_NAME     "gtasks"
 
+# 编译期 cwd 钉到 nsi 所在目录：makensis 的 File / OutFile 相对路径按启动 cwd
+# 解析（CI 从仓库根调它），不钉住的话 ../../bin 会飘到仓库外面去。
+!cd "${__FILEDIR__}"
+
 # VIProductVersion / VIFileVersion 必须是四段数字。
 VIProductVersion "${APP_VERSION}.0"
 VIFileVersion    "${APP_VERSION}.0"
