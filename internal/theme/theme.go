@@ -6,6 +6,7 @@
 package theme
 
 import (
+	"fmt"
 	"os"
 	"strings"
 	"sync"
@@ -59,6 +60,11 @@ func EffectiveDark(mode Mode) bool {
 // 颜色类型（Wails 的 application.RGBA 由调用方自己转）。
 type RGB struct {
 	R, G, B uint8
+}
+
+// CSS 返回 #rrggbb 形式，给注入文档的内联样式用。
+func (c RGB) CSS() string {
+	return fmt.Sprintf("#%02x%02x%02x", c.R, c.G, c.B)
 }
 
 // PageBackground 是会话页（tasks.google.com）的首屏底色，取自 Google 网页版

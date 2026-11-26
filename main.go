@@ -197,12 +197,20 @@ func main() {
 		// created from an external URL, so start from a stub that redirects and
 		// let it register the bootstrap for the whole webview lifetime instead.
 		mainOptions.URL = ""
-		mainOptions.HTML = bridge.RedirectHTML(tasksURLFor(i18nManager.Lang()))
+		mainOptions.HTML = bridge.RedirectHTML(tasksURLFor(i18nManager.Lang()), theme.PageBackground(startDark).CSS())
 	}
 	mainWindow := app.Window.NewWithOptions(mainOptions)
 	// Wails 在 macOS 上要等加载完成才跑 bootstrap，首帧到加载完成之间 Google
 	// 默认顶栏会露出来；补一个 document-start 用户脚本把这段也盖住。
 	appkit.AddDocumentStartScript(windowTitle, bridge.EarlyPaintJS)
+	// Windows 上 bootstrap 只靠 navigateInitialPage 里那次 document-start 注册；
+	// 注册一旦丢失（WebView2 控制器重建等），会话页就回到 Google 原样：白屏 +
+	// 九宫格 + 没有主题 / 语言按钮。每次导航完成补一次幂等注入兜底。
+	if runtime.GOOS == "windows" {
+		mainWindow.OnWindowEvent(events.Windows.WebViewNavigationCompleted, func(*application.WindowEvent) {
+			mainWindow.ExecJS(bridge.BootstrapIfMissingJS)
+		})
+	}
 	// 升级事件 / 退出回调到这里才有真身：推给主窗口注入的对话框，退出走 app。
 	updateBridgeMu.Lock()
 	updatePush = func(ev update.Event) {

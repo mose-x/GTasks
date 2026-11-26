@@ -29,6 +29,12 @@ var BootstrapJS string
 //go:embed earlypaint.js
 var EarlyPaintJS string
 
+// BootstrapIfMissingJS 是 Windows 的兜底注入串：WebView2 的 document-start
+// 脚本只在 navigateInitialPage 的 HTML 分支注册一次，控制器重建等场景下会丢，
+// 丢了就是「白屏 + Google 原样顶栏」。每次导航完成执行一次本串：bootstrap 已经
+// 在跑就什么都不做，没跑则整份补跑（bootstrap 自身幂等）。
+var BootstrapIfMissingJS = "window.__gtask&&window.__gtask.installed?0:(function(){" + BootstrapJS + "})();"
+
 // reportsMainFrame records whether the Wails backend fills in
 // OriginInfo.IsMainFrame. Only the darwin backend does: the WebView2 and
 // WebKitGTK message paths leave the field false for every frame, so enforcing
@@ -343,9 +349,12 @@ func dispatchScript(id uint64, method string, args any) (string, error) {
 // registration lives for the whole webview lifetime, the bootstrap is re-injected
 // into every document the login chain produces — at document start, ahead of the
 // page's own scripts.
-func RedirectHTML(target string) string {
+func RedirectHTML(target, background string) string {
 	// json.Marshal on a string cannot fail.
 	literal, _ := jsStringLiteral(target)
-	return `<!doctype html><html><head><meta charset="utf-8"></head><body>` +
-		`<script>location.replace(` + literal + `);</script></body></html>`
+	// 内联底色跟主题走：WebView2 首帧之前至少不是白块。
+	literalBG, _ := jsStringLiteral(background)
+	return `<!doctype html><html><head><meta charset="utf-8"></head>` +
+		`<body style="margin:0;background:` + background + `">` +
+		`<script>document.body.style.background=` + literalBG + `;location.replace(` + literal + `);</script></body></html>`
 }

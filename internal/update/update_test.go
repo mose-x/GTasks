@@ -176,3 +176,56 @@ func TestDownloadVerifiesChecksum(t *testing.T) {
 		t.Fatal("payload must be removed after a checksum mismatch")
 	}
 }
+
+func TestCheckFallsBackToWebWhenRateLimited(t *testing.T) {
+	osToken := map[string]string{"windows": "windows", "darwin": "macos", "linux": "linux"}[runtime.GOOS]
+	archToken := map[string]string{"amd64": "x64", "arm64": "arm64"}[runtime.GOARCH]
+	ext := map[string]string{"darwin": ".bin", "windows": ".exe", "linux": ""}[runtime.GOOS]
+	assetName := fmt.Sprintf("gtasks-1.0.5-%s-%s%s", osToken, archToken, ext)
+	sumsLine := "deadbeef  " + assetName + "\n"
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasPrefix(r.URL.Path, "/repos/o/r/releases"):
+			// API 通道：限流。
+			w.WriteHeader(http.StatusForbidden)
+		case r.URL.Path == "/o/r/releases/latest":
+			http.Redirect(w, r, "/o/r/releases/tag/v1.0.5", http.StatusFound)
+		case strings.HasSuffix(r.URL.Path, "sha256sums.txt"):
+			fmt.Fprint(w, sumsLine)
+		default:
+			fmt.Fprint(w, "payload")
+		}
+	}))
+	defer server.Close()
+
+	u := NewUpdater(AppInfo{Version: "1.0.0", UpdateURL: server.URL + "/repos/o/r/releases/latest"}, nil, nil)
+	info, err := u.Check()
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	if !info.HasUpdate || info.LatestVersion != "1.0.5" {
+		t.Fatalf("got %+v, want stable 1.0.5 via web fallback", info)
+	}
+	if info.Filename != assetName {
+		t.Errorf("filename = %q, want %q", info.Filename, assetName)
+	}
+	if info.Sha256 != "deadbeef" {
+		t.Errorf("sha256 = %q, want deadbeef", info.Sha256)
+	}
+	if !strings.HasSuffix(info.DownloadURL, "/releases/download/v1.0.5/"+assetName) {
+		t.Errorf("download url = %q, want the convention-built asset URL", info.DownloadURL)
+	}
+}
+
+func TestCheckRateLimitedWithoutDerivableWebURL(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusTooManyRequests)
+	}))
+	defer server.Close()
+	u := NewUpdater(AppInfo{Version: "1.0.0", UpdateURL: server.URL + "/latest"}, nil, nil)
+	_, err := u.Check()
+	if err == nil || !strings.Contains(err.Error(), "rate limited") {
+		t.Fatalf("want a rate-limit error, got %v", err)
+	}
+}

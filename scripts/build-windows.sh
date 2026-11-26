@@ -39,7 +39,9 @@ jq --arg v "$WIN_VER" --arg full "$BASE_VER" \
    | .RT_MANIFEST["#1"]["0409"].identity.version = $v' \
   winres/winres.json > winres/winres.json.tmp && mv winres/winres.json.tmp winres/winres.json
 # 本地构建不留脏工作区：脚本改过的 winres.json 退出时还原（只还原这一个文件）。
-trap '[ -n "$VERSION" ] && git checkout winres/winres.json 2>/dev/null' EXIT
+# resource.syso 是 Windows PE 对象，留在仓库根会把 darwin / linux 的链接炸掉
+# （ld: unknown file type），退出时连同 winres.json 的版本 bump 一起还原。
+trap '[ -n "$VERSION" ] && { git checkout winres/winres.json 2>/dev/null; rm -f resource.syso; }' EXIT
 echo "版本号 $VERSION 已同步进 winres/winres.json"
 
 # --- go-winres 生成 resource.syso（图标 + VERSIONINFO + manifest），链接器自动嵌入。
