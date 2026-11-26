@@ -4,17 +4,22 @@
 ; GTasks 的 Windows 产物是 scripts/build-windows.sh 里裸 go build 出来的，
 ; 不经过 wails CLI，所以这里自成一体，makensis 直接吃本文件。
 ;
-; 本地调试：
+; 路径约定：makensis 的 File / OutFile 相对路径按「启动 makensis 时的 cwd」解析，
+; 而 __FILEDIR__ 是「nsi 相对启动 cwd 的目录」，两者同锚 —— 所以本文件里所有
+; 相对路径都写成 ${__FILEDIR__}\... 形式，从仓库根或从 installer 目录调都对。
+;
+; 本地调试（仓库根执行）：
 ;   makensis -DAPP_VERSION=1.0.1 \
-;     -DBIN_PATH=..\..\bin\gtasks-1.0.1-windows-x64.exe \
-;     -DOUT_NAME=gtasks-1.0.1-windows-x64-installer.exe project.nsi
+;     -DBIN_PATH=build/bin/gtasks-1.0.1-windows-x64.exe \
+;     -DOUT_NAME=gtasks-1.0.1-windows-x64-installer.exe \
+;     build/windows/installer/project.nsi
 Unicode true
 
 !ifndef APP_VERSION
   !define APP_VERSION "0.0.0"
 !endif
 !ifndef BIN_PATH
-  !define BIN_PATH "..\..\bin\gtasks.exe"
+  !define BIN_PATH "${__FILEDIR__}\..\..\bin\gtasks.exe"
 !endif
 !ifndef OUT_NAME
   !define OUT_NAME "gtasks-installer.exe"
@@ -26,9 +31,6 @@ Unicode true
 !define UNINST_KEY        "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PRODUCT_NAME}"
 !define DATA_DIR_NAME     "gtasks"
 
-# 编译期 cwd 钉到 nsi 所在目录：makensis 的 File / OutFile 相对路径按启动 cwd
-# 解析（CI 从仓库根调它），不钉住的话 ../../bin 会飘到仓库外面去。
-!cd "${__FILEDIR__}"
 
 # VIProductVersion / VIFileVersion 必须是四段数字。
 VIProductVersion "${APP_VERSION}.0"
@@ -47,15 +49,15 @@ ManifestDPIAware true
 !include "FileFunc.nsh"
 
 Name "${PRODUCT_NAME} ${APP_VERSION}"
-OutFile "..\..\bin\${OUT_NAME}"
+OutFile "${__FILEDIR__}\..\..\bin\${OUT_NAME}"
 # per-user 安装：不弹 UAC，且自升级（internal/update 原地换 exe）要写安装目录，
 # 装到 Program Files 会让普通权限的自升级写不进去；$LOCALAPPDATA 没这问题。
 InstallDir "$LOCALAPPDATA\Programs\${PRODUCT_NAME}"
 RequestExecutionLevel user
 SetCompressor /SOLID lzma
 
-!define MUI_ICON "..\icon.ico"
-!define MUI_UNICON "..\icon.ico"
+!define MUI_ICON "${__FILEDIR__}\..\icon.ico"
+!define MUI_UNICON "${__FILEDIR__}\..\icon.ico"
 !define MUI_FINISHPAGE_NOAUTOCLOSE
 !define MUI_ABORTWARNING
 !define MUI_FINISHPAGE_RUN "$INSTDIR\${PRODUCT_EXECUTABLE}"
@@ -91,7 +93,7 @@ Section "Install"
 
   SetOutPath $INSTDIR
   File /oname=${PRODUCT_EXECUTABLE} "${BIN_PATH}"
-  File "..\icon.ico"
+  File "${__FILEDIR__}\..\icon.ico"
 
   CreateShortcut "$SMPROGRAMS\${PRODUCT_NAME}.lnk" "$INSTDIR\${PRODUCT_EXECUTABLE}" "" "$INSTDIR\icon.ico"
   CreateShortcut "$DESKTOP\${PRODUCT_NAME}.lnk" "$INSTDIR\${PRODUCT_EXECUTABLE}" "" "$INSTDIR\icon.ico"
