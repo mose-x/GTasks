@@ -45,6 +45,14 @@ VIAddVersionKey "ProductName"     "${PRODUCT_NAME}"
 
 ManifestDPIAware true
 
+# TEMP-DEBUG（验证完删）：摸清 makensis 编译期 cwd 与相对路径基准。
+!echo "TEMP-DEBUG FILEDIR=${__FILEDIR__}"
+!system "cd"
+!system "dir /b build\bin 2>nul || echo NO_ROOT_BIN"
+!system "dir /b ..\..\bin 2>nul || echo NO_RELBLD_BIN"
+!system "dir /b ..\icon.ico 2>nul || echo NO_REL_ICON"
+!system "dir /b build\windows\icon.ico 2>nul || echo NO_ROOT_ICON"
+
 !include "MUI2.nsh"
 !include "FileFunc.nsh"
 
