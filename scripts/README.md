@@ -3,7 +3,7 @@
 | 脚本                               | 平台                     | 产物（`build/bin/`）                                   |
 | ---------------------------------- | ------------------------ | ------------------------------------------------------ |
 | `build-macos.sh`                   | macOS（amd64 / arm64）   | `.dmg`                                                 |
-| `build-windows.sh`                 | Windows（amd64 / arm64） | `.exe`                                                 |
+| `build-windows.sh`                 | Windows（amd64 / arm64） | `.exe` + NSIS 安装包 `-installer.exe`                  |
 | `build-linux.sh`                   | Linux（amd64 / arm64）   | 裸二进制 + `.tar.gz`（+ `.deb` / `.rpm`，装了 fpm 时） |
 | `run-first-installed-local-mac.sh` | macOS（安装后修复）      | 剥 ad-hoc 签名 + 重打 quarantine                       |
 | `verify-lang-switch.py`            | 跨平台                   | 语言 / 主题切换的端到端回归（`make verify`）           |
@@ -38,8 +38,15 @@ make checksums            # 为 build/bin/ 里的产物生成 sha256sums.txt
 
 ### Windows
 
-- 无构建依赖：Wails v3 通过 purego 加载 WebView2，`CGO_ENABLED=0` 即可，
+- 裸 exe 无构建依赖：Wails v3 通过 purego 加载 WebView2，`CGO_ENABLED=0` 即可，
   能从 macOS / Linux 直接交叉编译出 amd64 与 arm64
+- `go-winres`（`go install github.com/tc-hib/go-winres@v0.3.3`）：把图标 /
+  VERSIONINFO / manifest 打成 `resource.syso` 嵌进 exe；缺了脚本会直接失败，
+  因为资源是发布物的一部分（CI 会装）
+- NSIS 安装包另需 `makensis`（macOS：`brew install nsis`；
+  Windows 镜像自带但不在 bash PATH，CI 的 Setup NSIS 步骤会加进去）。
+  缺 `makensis` 时只出裸 exe 并告警，不中断构建
+- 裸 exe 用 `-H=windowsgui` 链接成 GUI 子系统：运行期不挂 cmd 黑窗
 - 运行时需要 **WebView2 Runtime**（Windows 10/11 一般已内置）
 
 ### Linux
@@ -65,10 +72,13 @@ gtasks-<版本>-<平台>-<架构>.<后缀>
   文件名仍保留完整版本号
 
 例：`gtasks-1.0.0-macos-arm64.dmg`、`gtasks-1.0.0-windows-x64.exe`、
-`gtasks-1.0.0-linux-x64.tar.gz`。
+`gtasks-1.0.0-windows-x64-installer.exe`、`gtasks-1.0.0-linux-x64.tar.gz`。
 
-版本号还会写进产物自身：二进制的 `main.version`（`gtasks --version` 可查）
-与 macOS 的 `Info.plist`（`CFBundleShortVersionString` / `CFBundleVersion`）。
+版本号还会写进产物自身：二进制的 `main.version`（`gtasks --version` 可查）、
+macOS 的 `Info.plist`（`CFBundleShortVersionString` / `CFBundleVersion`）、
+Windows 的 VERSIONINFO（`winres/winres.json`，构建时由脚本同步）与 NSIS
+安装包的文件版本。`-installer.exe` 只用于首装 / 覆盖安装，自升级只认裸资产
+（`internal/update` 的 `isExcludedAsset` 会把安装包排除掉）。
 
 ---
 
