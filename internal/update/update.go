@@ -5,6 +5,11 @@
 //
 // 与 SVC 的差异只有外围：GTasks 没有代理服务 / 多线程下载器 / GitHub 镜像，
 // 网络一律走 http.DefaultTransport（尊重 http_proxy 等环境变量）。
+//
+// GitHub 未认证 API 每 IP 每小时 60 次，超了返回 403/429（共享出口 IP 很容易被
+// 别的工具耗光）。检查遇到限流时自动走不依赖 API 的兜底链：web 端
+// /releases/latest 的 302 拿最新正式版 tag，再按资产命名约定直拼裸二进制与
+// sha256sums.txt 的下载 URL（HEAD 探活后才报可用）。
 package update
 
 import (
@@ -14,7 +19,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
+	"path"
 	"regexp"
 	"runtime"
 	"strconv"
@@ -173,6 +180,15 @@ func (u *Updater) check() (UpdateInfo, error) {
 		return UpdateInfo{}, fmt.Errorf("network error, unable to reach update server: %w", err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusTooManyRequests {
+		// 未认证 API 限流：换不依赖 API 的兜底链；兜底也失败才把状态码报出去。
+		if via, viaErr := u.checkViaWeb(); viaErr == nil {
+			return via, nil
+		} else {
+			return UpdateInfo{}, fmt.Errorf("update server returned HTTP %d (GitHub API rate limited) and the API-free fallback failed: %v",
+				resp.StatusCode, viaErr)
+		}
+	}
 	if resp.StatusCode != http.StatusOK {
 		return UpdateInfo{}, fmt.Errorf("update server returned HTTP %d", resp.StatusCode)
 	}
@@ -215,14 +231,30 @@ func (u *Updater) check() (UpdateInfo, error) {
 // 匹配不到再退化成「包含 os/arch 且不在排除后缀里」的扫描。资产命名见
 // scripts/build-*.sh：macos 自升级用裸 .bin（不是 .dmg），linux 用无扩展名
 // 裸二进制（不是 .deb/.rpm/.tar.gz），windows 用裸 .exe。
+// platformAssetName 按命名约定拼当前平台的裸二进制资产名；不支持的平台 ok=false。
+// 匹配 release 资产表与 API 限流兜底链直拼 URL 都用它，保证两边命名永远一致。
+func platformAssetTokens() (osToken, archToken, ext string, ok bool) {
+	osToken = map[string]string{"windows": "windows", "darwin": "macos", "linux": "linux"}[runtime.GOOS]
+	archToken = map[string]string{"amd64": "x64", "arm64": "arm64"}[runtime.GOARCH]
+	ext = map[string]string{"darwin": ".bin", "windows": ".exe", "linux": ""}[runtime.GOOS]
+	return osToken, archToken, ext, osToken != "" && archToken != ""
+}
+
+func platformAssetName(version string) (string, bool) {
+	osToken, archToken, ext, ok := platformAssetTokens()
+	if !ok {
+		return "", false
+	}
+	return fmt.Sprintf("gtasks-%s-%s-%s%s", version, osToken, archToken, ext), true
+}
+
 func matchPlatformAsset(assets []githubAsset, version string) (githubAsset, bool) {
-	osToken := map[string]string{"windows": "windows", "darwin": "macos", "linux": "linux"}[runtime.GOOS]
-	archToken := map[string]string{"amd64": "x64", "arm64": "arm64"}[runtime.GOARCH]
-	if osToken == "" || archToken == "" {
+	want, ok := platformAssetName(version)
+	if !ok {
 		return githubAsset{}, false
 	}
-	ext := map[string]string{"darwin": ".bin", "windows": ".exe", "linux": ""}[runtime.GOOS]
-	want := strings.ToLower(fmt.Sprintf("gtasks-%s-%s-%s%s", version, osToken, archToken, ext))
+	want = strings.ToLower(want)
+	osToken, archToken, _, _ := platformAssetTokens()
 	for _, a := range assets {
 		if strings.ToLower(a.Name) == want {
 			return a, true
@@ -256,6 +288,83 @@ func isExcludedAsset(name string) bool {
 	return false
 }
 
+// webReleasesLatestURL 把 Releases API 的 URL 翻译成 web 端 /releases/latest：
+// api.github.com/repos/O/R/... -> github.com/O/R/releases/latest；其它 host
+// （单测的 httptest / GTASKS_UPDATE_URL mock）保持原 host，只去掉 repos/ 前缀。
+func webReleasesLatestURL(updateURL string) (string, bool) {
+	u, err := url.Parse(updateURL)
+	if err != nil {
+		return "", false
+	}
+	parts := strings.Split(strings.Trim(u.Path, "/"), "/")
+	if len(parts) < 5 || parts[0] != "repos" || parts[3] != "releases" || parts[4] != "latest" {
+		return "", false
+	}
+	scheme, host := u.Scheme, u.Host
+	if host == "api.github.com" {
+		scheme, host = "https", "github.com"
+	}
+	return fmt.Sprintf("%s://%s/%s/%s/releases/latest", scheme, host, parts[1], parts[2]), true
+}
+
+// checkViaWeb 是 API 限流时的兜底检查：web 端 /releases/latest 会 302 到最新
+// 正式版（GitHub 自己就排除了 pre-release），从 Location 里读 tag；资产 URL 按
+// 命名约定直拼，HEAD 探活通过才报可用。release 页 HTML 太脆，这条链不取
+// changelog，留空由页面自行省略。
+func (u *Updater) checkViaWeb() (UpdateInfo, error) {
+	webURL, ok := webReleasesLatestURL(u.info.UpdateURL)
+	if !ok {
+		return UpdateInfo{}, fmt.Errorf("cannot derive a web release URL from %q", u.info.UpdateURL)
+	}
+	stop := &http.Client{
+		Timeout: 20 * time.Second,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	resp, err := stop.Get(webURL)
+	if err != nil {
+		return UpdateInfo{}, fmt.Errorf("network error, unable to reach release page: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 300 || resp.StatusCode > 399 {
+		return UpdateInfo{}, fmt.Errorf("release page returned HTTP %d", resp.StatusCode)
+	}
+	loc, err := resp.Location()
+	if err != nil {
+		return UpdateInfo{}, fmt.Errorf("release page redirect has no location: %w", err)
+	}
+	tag := path.Base(loc.Path)
+	version := strings.TrimPrefix(tag, "v")
+	if !stableVersionReg.MatchString(version) {
+		return UpdateInfo{HasUpdate: false}, nil
+	}
+	info := UpdateInfo{LatestVersion: version}
+	if CompareVersions(version, u.info.Version) <= 0 {
+		return info, nil
+	}
+	name, ok := platformAssetName(version)
+	if !ok {
+		return UpdateInfo{}, fmt.Errorf("unsupported platform %s/%s", runtime.GOOS, runtime.GOARCH)
+	}
+	base := strings.TrimSuffix(webURL, "/releases/latest")
+	downloadURL := fmt.Sprintf("%s/releases/download/%s/%s", base, tag, name)
+	follow := &http.Client{Timeout: 20 * time.Second}
+	head, err := follow.Head(downloadURL)
+	if err != nil {
+		return UpdateInfo{}, fmt.Errorf("network error, unable to reach release asset: %w", err)
+	}
+	head.Body.Close()
+	if head.StatusCode != http.StatusOK {
+		return UpdateInfo{}, fmt.Errorf("release asset returned HTTP %d", head.StatusCode)
+	}
+	info.HasUpdate = true
+	info.DownloadURL = downloadURL
+	info.Filename = name
+	info.Sha256 = fetchSha256FromURL(follow, fmt.Sprintf("%s/releases/download/%s/sha256sums.txt", base, tag), name)
+	return info, nil
+}
+
 // fetchAssetSha256 从 sha256sums.txt 里取 filename 对应的哈希；清单缺失或
 // 没列这个文件时返回空串，Download 随之跳过校验（兼容老 release）。
 func fetchAssetSha256(client *http.Client, assets []githubAsset, filename string) string {
@@ -269,6 +378,10 @@ func fetchAssetSha256(client *http.Client, assets []githubAsset, filename string
 	if sumsURL == "" {
 		return ""
 	}
+	return fetchSha256FromURL(client, sumsURL, filename)
+}
+
+func fetchSha256FromURL(client *http.Client, sumsURL, filename string) string {
 	resp, err := client.Get(sumsURL)
 	if err != nil {
 		return ""
