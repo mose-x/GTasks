@@ -152,7 +152,7 @@ func TestMarkNavigatingFailsInflightCalls(t *testing.T) {
 	}
 }
 func TestRedirectHTMLQuotesTarget(t *testing.T) {
-	html := RedirectHTML("https://tasks.google.com/")
+	html := RedirectHTML("https://tasks.google.com/", "#1b1b1b")
 	if !strings.HasPrefix(html, "<!doctype html>") {
 		t.Fatalf("应是完整的 HTML 文档: %s", html)
 	}
@@ -162,11 +162,27 @@ func TestRedirectHTMLQuotesTarget(t *testing.T) {
 	if strings.Count(html, "</script>") != 1 {
 		t.Fatalf("文档结构异常: %s", html)
 	}
+	if !strings.Contains(html, "background:#1b1b1b") {
+		t.Fatalf("缺少内联底色: %s", html)
+	}
+}
+
+func TestBootstrapIfMissingJSIsGuarded(t *testing.T) {
+	const guard = "window.__gtask&&window.__gtask.installed?0:(function(){"
+	if !strings.HasPrefix(BootstrapIfMissingJS, guard) {
+		t.Fatalf("缺少幂等守卫: %s", BootstrapIfMissingJS[:min(len(BootstrapIfMissingJS), 80)])
+	}
+	if !strings.Contains(BootstrapIfMissingJS, BootstrapJS) {
+		t.Fatalf("兜底串未包含完整 bootstrap")
+	}
+	if !strings.HasSuffix(BootstrapIfMissingJS, "})();") {
+		t.Fatalf("兜底串应以自执行函数收尾: %s", BootstrapIfMissingJS[len(BootstrapIfMissingJS)-8:])
+	}
 }
 
 // The target ends up inside an inline script, so markup must be escaped.
 func TestRedirectHTMLEscapesMarkup(t *testing.T) {
-	html := RedirectHTML(`https://tasks.google.com/</script><script>alert(1)`)
+	html := RedirectHTML(`https://tasks.google.com/</script><script>alert(1)`, "#1b1b1b")
 	if strings.Contains(html, "</script><script>") {
 		t.Fatalf("目标 URL 未转义，可提前结束 script: %s", html)
 	}
