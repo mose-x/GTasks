@@ -1821,6 +1821,18 @@
       }, 2600);
       return;
     }
+    // 检查失败单独一档：安装版给友好文案 + 安装包指引，不糊原始错误。
+    if (ev.stage === "checkfailed") {
+      openDialog({
+        title: tt("update.checkFailedTitle", "检查更新失败"),
+        body: sub(
+          "update.checkFailedBody",
+          "连不上更新服务器（可能是网络或代理限制）。可稍后重试，或到发布页下载最新安装包手动更新。",
+        ),
+        buttons: [closeBtn, retryBtn],
+      });
+      return;
+    }
     if (ev.stage === "error") {
       openDialog({
         title: tt("update.errorTitle", "更新失败"),
