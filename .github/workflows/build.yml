@@ -39,6 +39,37 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
           cache: true
 
+      - name: Install go-winres
+        # 图标 / VERSIONINFO / manifest 资源由 go-winres 生成 resource.syso，
+        # 链接器嵌进裸 exe；版本固定，避免 CI 解析到不兼容的新版。
+        run: go install github.com/tc-hib/go-winres@v0.3.3
+
+      - name: Setup NSIS
+        # scripts/build-windows.sh 里 makensis 打 NSIS 安装包。windows-latest
+        # 镜像自带 NSIS 但不在 bash 的 PATH 上，不加这一步脚本会告警跳过安装包；
+        # 镜像布局变了就退到 choco 兜底（带重试，community 源偶发 504）。
+        shell: pwsh
+        run: |
+          $candidates = @(
+            "C:\Program Files (x86)\NSIS",
+            "C:\Program Files\NSIS"
+          )
+          $nsisDir = $candidates | Where-Object { Test-Path "$_\makensis.exe" } | Select-Object -First 1
+          if (-not $nsisDir) {
+            for ($i = 1; $i -le 4 -and -not $nsisDir; $i++) {
+              Write-Host "choco install nsis (attempt $i)..."
+              choco install nsis -y --no-progress
+              Start-Sleep -Seconds ($i * 10)
+              $nsisDir = $candidates | Where-Object { Test-Path "$_\makensis.exe" } | Select-Object -First 1
+            }
+            if (-not $nsisDir) {
+              throw "NSIS unavailable: makensis.exe not found after 4 choco attempts"
+            }
+          }
+          Add-Content $env:GITHUB_PATH $nsisDir
+          Write-Host "NSIS dir: $nsisDir"
+          & "$nsisDir\makensis.exe" -VERSION
+
       - name: Compute version
         # 标签形如 refs/tags/v1.0.0 -> 版本 1.0.0；workflow_dispatch 没有标签时
         # 落到 0.0.0-dev。

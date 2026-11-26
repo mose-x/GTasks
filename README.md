@@ -403,7 +403,7 @@ outstanding**.
 | Platform | Artifacts                                                            | Script                     |
 | -------- | -------------------------------------------------------------------- | -------------------------- |
 | macOS    | `.dmg`                                                               | `scripts/build-macos.sh`   |
-| Windows  | `.exe`                                                               | `scripts/build-windows.sh` |
+| Windows  | `.exe` + `-installer.exe` (NSIS first-install package)                 | `scripts/build-windows.sh` |
 | Linux    | bare binary + `.tar.gz` (plus `.deb` / `.rpm` when fpm is installed) | `scripts/build-linux.sh`   |
 
 The version is stamped both into the binary (`./gtasks --version`) and into the macOS

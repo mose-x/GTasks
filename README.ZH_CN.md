@@ -346,7 +346,7 @@ make help                   # 全部目标
 | 平台    | 产物                                                  | 打包脚本                   |
 | ------- | ----------------------------------------------------- | -------------------------- |
 | macOS   | `.dmg`                                                | `scripts/build-macos.sh`   |
-| Windows | `.exe`                                                | `scripts/build-windows.sh` |
+| Windows | `.exe` + `-installer.exe`（NSIS 首装包）                   | `scripts/build-windows.sh` |
 | Linux   | 裸二进制 + `.tar.gz`（装了 fpm 再给 `.deb` / `.rpm`） | `scripts/build-linux.sh`   |
 
 版本号同时写进二进制（`./gtasks --version`）与 macOS 的 `Info.plist`。
