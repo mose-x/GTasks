@@ -4,13 +4,13 @@
 ; GTasks 的 Windows 产物是 scripts/build-windows.sh 里裸 go build 出来的，
 ; 不经过 wails CLI，所以这里自成一体，makensis 直接吃本文件。
 ;
-; 路径约定：makensis 的 File / OutFile 相对路径按「启动 makensis 时的 cwd」解析，
-; 而 __FILEDIR__ 是「nsi 相对启动 cwd 的目录」，两者同锚 —— 所以本文件里所有
-; 相对路径都写成 ${__FILEDIR__}\... 形式，从仓库根或从 installer 目录调都对。
+; 路径约定：makensis 编译期 cwd 就是 nsi 所在目录，本文件里所有相对路径都按
+; 「nsi 目录」写（..\..\bin 即仓库的 build/bin）。注意 NSIS 的 File 只认反斜杠：
+; 传 -D 值时务必用 ..\..\bin\xxx.exe 形式，正斜杠会 "no files found"。
 ;
 ; 本地调试（仓库根执行）：
 ;   makensis -DAPP_VERSION=1.0.1 \
-;     -DBIN_PATH=build/bin/gtasks-1.0.1-windows-x64.exe \
+;     '-DBIN_PATH=..\..\bin\gtasks-1.0.1-windows-x64.exe' \
 ;     -DOUT_NAME=gtasks-1.0.1-windows-x64-installer.exe \
 ;     build/windows/installer/project.nsi
 Unicode true
@@ -19,7 +19,7 @@ Unicode true
   !define APP_VERSION "0.0.0"
 !endif
 !ifndef BIN_PATH
-  !define BIN_PATH "${__FILEDIR__}\..\..\bin\gtasks.exe"
+  !define BIN_PATH "..\..\bin\gtasks.exe"
 !endif
 !ifndef OUT_NAME
   !define OUT_NAME "gtasks-installer.exe"
@@ -45,27 +45,19 @@ VIAddVersionKey "ProductName"     "${PRODUCT_NAME}"
 
 ManifestDPIAware true
 
-# TEMP-DEBUG（验证完删）：摸清 makensis 编译期 cwd 与相对路径基准。
-!echo "TEMP-DEBUG FILEDIR=${__FILEDIR__}"
-!system "cd"
-!system "dir /b build\bin 2>nul || echo NO_ROOT_BIN"
-!system "dir /b ..\..\bin 2>nul || echo NO_RELBLD_BIN"
-!system "dir /b ..\icon.ico 2>nul || echo NO_REL_ICON"
-!system "dir /b build\windows\icon.ico 2>nul || echo NO_ROOT_ICON"
-
 !include "MUI2.nsh"
 !include "FileFunc.nsh"
 
 Name "${PRODUCT_NAME} ${APP_VERSION}"
-OutFile "${__FILEDIR__}\..\..\bin\${OUT_NAME}"
+OutFile "..\..\bin\${OUT_NAME}"
 # per-user 安装：不弹 UAC，且自升级（internal/update 原地换 exe）要写安装目录，
 # 装到 Program Files 会让普通权限的自升级写不进去；$LOCALAPPDATA 没这问题。
 InstallDir "$LOCALAPPDATA\Programs\${PRODUCT_NAME}"
 RequestExecutionLevel user
 SetCompressor /SOLID lzma
 
-!define MUI_ICON "${__FILEDIR__}\..\icon.ico"
-!define MUI_UNICON "${__FILEDIR__}\..\icon.ico"
+!define MUI_ICON "..\icon.ico"
+!define MUI_UNICON "..\icon.ico"
 !define MUI_FINISHPAGE_NOAUTOCLOSE
 !define MUI_ABORTWARNING
 !define MUI_FINISHPAGE_RUN "$INSTDIR\${PRODUCT_EXECUTABLE}"
@@ -101,7 +93,7 @@ Section "Install"
 
   SetOutPath $INSTDIR
   File /oname=${PRODUCT_EXECUTABLE} "${BIN_PATH}"
-  File "${__FILEDIR__}\..\icon.ico"
+  File "..\icon.ico"
 
   CreateShortcut "$SMPROGRAMS\${PRODUCT_NAME}.lnk" "$INSTDIR\${PRODUCT_EXECUTABLE}" "" "$INSTDIR\icon.ico"
   CreateShortcut "$DESKTOP\${PRODUCT_NAME}.lnk" "$INSTDIR\${PRODUCT_EXECUTABLE}" "" "$INSTDIR\icon.ico"

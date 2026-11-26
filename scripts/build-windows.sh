@@ -65,11 +65,12 @@ GOOS=windows GOARCH="$ARCH" CGO_ENABLED=0 \
 # CI 的 windows-latest 镜像自带 NSIS，build.yml 会把它加进 PATH。
 INSTALLER_NAME="gtasks-${VERSION}-windows-${ASSET_ARCH}-installer.exe"
 if command -v makensis >/dev/null 2>&1; then
-  # BIN_PATH 用相对「启动 cwd」（仓库根）的路径：NSIS 的 File 按启动 cwd 解析，
-  # 而 Git bash 会把 /d/... 形式的绝对参数转换给 Windows 原生 exe，转完反而找不到。
+  # BIN_PATH 必须是「相对 nsi 目录 + 反斜杠」：makensis 编译期 cwd 是 nsi 目录，
+  # 且 NSIS 的 File 不认正斜杠；Git bash 还会把 /d/... 形式的绝对参数转换给
+  # Windows 原生 exe，两种都会 "no files found"。
   makensis -V2 \
     -DAPP_VERSION="$BASE_VER" \
-    -DBIN_PATH="build/bin/${ASSET_NAME}" \
+    -DBIN_PATH="..\\..\\bin\\${ASSET_NAME}" \
     -DOUT_NAME="$INSTALLER_NAME" \
     build/windows/installer/project.nsi
 else
