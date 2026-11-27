@@ -199,6 +199,9 @@ func main() {
 		// let it register the bootstrap for the whole webview lifetime instead.
 		mainOptions.URL = ""
 		mainOptions.HTML = bridge.RedirectHTML(tasksURLFor(i18nManager.Lang()), theme.PageBackground(startDark).CSS())
+		// 配合下面的「ready 再显示」：窗口创建即隐藏，wails 也不会在首次
+		// 导航完成时自动 Show（options.Hidden 会关掉那条自动显示路径）。
+		mainOptions.Hidden = true
 	}
 	mainWindow := app.Window.NewWithOptions(mainOptions)
 	// Wails 在 macOS 上要等加载完成才跑 bootstrap，首帧到加载完成之间 Google
@@ -216,6 +219,20 @@ func main() {
 		mainWindow.OnWindowEvent(events.Windows.WebViewNavigationCompleted, func(*application.WindowEvent) {
 			mainWindow.ExecJS(bridge.BootstrapIfMissingJS)
 		})
+		// 首屏白屏根治：Windows 上 WebView2 初始化 + 登录链重定向期间没有可靠
+		// 的 document-start 遮罩，窗口先藏起来，等会话页 bootstrap 报到（页面
+		// 已基本画好）再显示；15 秒兜底防止 bootstrap 全死时窗口永远不出来。
+		go func() {
+			deadline := time.Now().Add(15 * time.Second)
+			for time.Now().Before(deadline) {
+				if sessionBridge.Ready() {
+					time.Sleep(250 * time.Millisecond)
+					break
+				}
+				time.Sleep(100 * time.Millisecond)
+			}
+			mainWindow.Show()
+		}()
 	}
 	// 升级事件 / 退出回调到这里才有真身：推给主窗口注入的对话框，退出走 app。
 	updateBridgeMu.Lock()
