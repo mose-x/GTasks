@@ -208,6 +208,11 @@ func main() {
 	// 注册一旦丢失（WebView2 控制器重建等），会话页就回到 Google 原样：白屏 +
 	// 九宫格 + 没有主题 / 语言按钮。每次导航完成补一次幂等注入兜底。
 	if runtime.GOOS == "windows" {
+		// ExecJS 被 runtimeLoaded 门控，而该标志正常由 bootstrap 自己上报；
+		// bootstrap 一旦没跑起来，Go 侧所有推送（升级对话框、兜底注入）会
+		// 永久排在 pending 队列里。Windows 上直接从 Go 侧解锁，代价只是
+		// 提前把 resizable 再设一遍（值不变）。
+		mainWindow.HandleMessage("wails:runtime:ready")
 		mainWindow.OnWindowEvent(events.Windows.WebViewNavigationCompleted, func(*application.WindowEvent) {
 			mainWindow.ExecJS(bridge.BootstrapIfMissingJS)
 		})
