@@ -393,6 +393,7 @@ type stateResponse struct {
 	Sniffing   bool               `json:"sniffing"`
 	OpsReady   int                `json:"opsReady"`
 	OpsTotal   int                `json:"opsTotal"`
+	Diag       json.RawMessage    `json:"diag,omitempty"`
 }
 
 func (h *Handler) handleState(w http.ResponseWriter, _ *http.Request) {
@@ -413,6 +414,9 @@ func (h *Handler) handleState(w http.ResponseWriter, _ *http.Request) {
 		response.Watcher = &status
 		response.AutoManage = h.watcher.AutoManage()
 		response.Sniffing = h.watcher.Sniffing()
+	}
+	if raw := h.bridge.LastDiag(); len(raw) > 0 {
+		response.Diag = raw
 	}
 	if h.registry != nil {
 		definitions := h.registry.All()
