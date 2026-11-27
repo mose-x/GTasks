@@ -33,7 +33,7 @@ var EarlyPaintJS string
 // 脚本只在 navigateInitialPage 的 HTML 分支注册一次，控制器重建等场景下会丢，
 // 丢了就是「白屏 + Google 原样顶栏」。每次导航完成执行一次本串：bootstrap 已经
 // 在跑就什么都不做，没跑则整份补跑（bootstrap 自身幂等）。
-var BootstrapIfMissingJS = "window.__gtask&&window.__gtask.installed?0:(function(){" + BootstrapJS + "})();"
+var BootstrapIfMissingJS = "window.__gtask&&window.__gtask.installed?0:(function(){window.__gtaskInjectVia=\"navcomplete\";" + BootstrapJS + "})();"
 
 // reportsMainFrame records whether the Wails backend fills in
 // OriginInfo.IsMainFrame. Only the darwin backend does: the WebView2 and
@@ -74,6 +74,7 @@ type envelope struct {
 	Error string          `json:"error,omitempty"`
 	Entry json.RawMessage `json:"entry,omitempty"`
 	Info  json.RawMessage `json:"info,omitempty"`
+	Diag  json.RawMessage `json:"diag,omitempty"`
 	Name  string          `json:"name,omitempty"`
 	Args  map[string]any  `json:"args,omitempty"`
 }
@@ -104,6 +105,7 @@ type Bridge struct {
 	stateMu sync.RWMutex
 	ready   bool
 	info    json.RawMessage
+	diag    json.RawMessage
 }
 
 // New returns an unbound bridge. Call Bind once the session window exists.
@@ -146,6 +148,14 @@ func (b *Bridge) Ready() bool {
 	b.stateMu.RLock()
 	defer b.stateMu.RUnlock()
 	return b.ready
+}
+
+// LastDiag 返回页面最近一次自诊断快照（bootstrap 各步骤的成败），
+// 控制面 /api/state 原样带出，供真机排障。
+func (b *Bridge) LastDiag() json.RawMessage {
+	b.stateMu.RLock()
+	defer b.stateMu.RUnlock()
+	return b.diag
 }
 
 // MarkNavigating 在会话页开始导航时调用（切语言的 location.replace、主题兜底
@@ -225,6 +235,11 @@ func (b *Bridge) HandleRaw(window application.Window, message string, origin *ap
 		if handler != nil {
 			go handler(decoded.Name, decoded.Args)
 		}
+
+	case "diag":
+		b.stateMu.Lock()
+		b.diag = decoded.Diag
+		b.stateMu.Unlock()
 
 	case "result":
 		b.mu.Lock()
