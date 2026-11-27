@@ -1930,42 +1930,114 @@
     installSplash(true);
   };
 
-  installInitDataRecorder();
+  // ---- 自诊断：把每一步的成败回传 Go（kind=diag），/api/state 可取。
+  // Windows 上注入链路一旦丢失，这是唯一能拿回的现场；macOS / Linux 只是
+  // 多几个无害字段，行为不变。
+  var diag = {
+    seq: (window.__gtaskBootSeq = (window.__gtaskBootSeq || 0) + 1),
+    via: window.__gtaskInjectVia || "docstart",
+    host: (function () {
+      try {
+        return location.hostname;
+      } catch (ignored) {
+        return "";
+      }
+    })(),
+    readyState: (function () {
+      try {
+        return document.readyState;
+      } catch (ignored) {
+        return "";
+      }
+    })(),
+    t: Date.now(),
+    steps: [],
+  };
+  function diagStep(name, fn) {
+    try {
+      fn();
+      diag.steps.push(name);
+    } catch (error) {
+      diag.steps.push(name + "! " + (error && error.message ? error.message : String(error)));
+    }
+  }
+  function diagSnapshot(tag) {
+    try {
+      if (typeof document.getElementById === "function") {
+        diag.style = !!document.getElementById("gtasks-ui-style");
+        diag.themeBtn = !!document.getElementById("gtasks-theme-btn");
+      }
+    } catch (ignored) {}
+    diag.last = tag;
+    diag.t2 = Date.now();
+    post({ kind: "diag", diag: diag });
+  }
+  // 自愈也救不回来时，把诊断直接挂成页面顶栏红条：用户截一张图就是现场。
+  function diagBanner() {
+    try {
+      if (document.getElementById("gtasks-diag-banner")) return;
+      var bar = document.createElement("div");
+      bar.id = "gtasks-diag-banner";
+      bar.setAttribute(
+        "style",
+        "position:fixed;left:0;top:0;right:0;z-index:2147483647;background:#b3261e;color:#fff;" +
+          "font:12px/1.5 ui-monospace,Menlo,Consolas,monospace;padding:8px 12px;white-space:pre-wrap;cursor:pointer",
+      );
+      bar.textContent = "GTasks diag: " + JSON.stringify(diag);
+      bar.addEventListener("click", function () {
+        if (bar.parentNode) bar.parentNode.removeChild(bar);
+      });
+      (document.body || document.documentElement).appendChild(bar);
+    } catch (ignored) {}
+  }
+
+  diagStep("initData", installInitDataRecorder);
 
   // 上一次开着抓包就立刻恢复，抢在页面自己的请求之前装好钩子。
   if (storedSniffing()) setSniffing(true);
 
-  installFetchSniffer();
-  installXHRSniffer();
+  diagStep("fetchSniffer", installFetchSniffer);
+  diagStep("xhrSniffer", installXHRSniffer);
 
   // Unlock WebviewWindow.ExecJS. Wails only flushes its pending-JS queue and
   // accepts ExecJS calls after it receives "wails:runtime:ready" from the page.
   // That message is normally sent by the Wails runtime bundle, which is never
   // loaded on an external origin, so the bridge reports it itself.
-  if (send) {
-    try {
-      send("wails:runtime:ready");
-    } catch (ignored) {}
-  }
+  diagStep("ready", function () {
+    if (send) send("wails:runtime:ready");
+  });
 
-  api.announce();
+  diagStep("announce", function () {
+    api.announce();
+  });
 
-  installUI();
+  diagStep("ui", function () {
+    installUI();
+  });
+  diagSnapshot("boot");
 
   // Windows 自愈：document-start 注入丢失、中途被打断、或 Google 水合把顶栏
-  // 按钮冲掉时，延迟补装两次 UI 层。观察器 / 右键监听重复挂载是安全的
-  // （装饰按节点 id 幂等），遮罩在自愈路径里跳过。
+  // 按钮冲掉时，延迟补装两次 UI 层；每次把结果再报一遍诊断。
   if (typeof setTimeout === "function") {
-    var healUI = function () {
+    var healUI = function (tag) {
       try {
         if (location.hostname === "tasks.google.com" && uiAvailable() && !document.getElementById("gtasks-theme-btn")) {
           window.__gtaskUIInstalled = false;
           installUI(true);
+          diag.steps.push(tag);
         }
-      } catch (ignored) {}
+      } catch (error) {
+        diag.steps.push(tag + "! " + (error && error.message ? error.message : String(error)));
+      }
+      diagSnapshot(tag);
+      if (!diag.themeBtn && tag === "heal2") diagBanner();
     };
-    setTimeout(healUI, 1500);
-    setTimeout(healUI, 4500);
+    setTimeout(function () {
+      healUI("heal1");
+    }, 1500);
+    setTimeout(function () {
+      healUI("heal2");
+    }, 4500);
   }
 
   // Document-start injection (Windows) announces before WIZ_global_data exists,
