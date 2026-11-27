@@ -2049,7 +2049,9 @@
         diag.steps.push(tag + "! " + (error && error.message ? error.message : String(error)));
       }
       diagSnapshot(tag);
-      if (!diag.themeBtn && tag === "heal2") diagBanner();
+      // 红条只在会话页有意义：登录页 / 跳转 stub 上没有 UI 层是正常状态，
+      // 挂红条只会吓到正在输密码的人。
+      if (!diag.themeBtn && tag === "heal2" && location.hostname === "tasks.google.com") diagBanner();
     };
     setTimeout(function () {
       healUI("heal1");
