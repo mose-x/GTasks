@@ -1850,10 +1850,11 @@
     }
   };
 
-  function installUI() {
+  function installUI(skipSplash) {
     if (!uiAvailable() || location.hostname !== "tasks.google.com") return;
     // 遮罩要抢在页面自己的首帧之前，所以放在最前面，且不受「已安装」短路影响。
-    installSplash();
+    // 自愈重试走 skipSplash：页面早已加载完，再盖遮罩只会闪一下。
+    if (!skipSplash) installSplash();
     // 隐藏九宫格 / 顶栏改排的样式同样要抢在首帧之前：这份 HTML 解压后有两兆多，
     // DOMContentLoaded 得等整份文档解析完，等着的话 Google 默认顶栏会先闪一秒。
     installUIStyles();
@@ -1950,6 +1951,22 @@
   api.announce();
 
   installUI();
+
+  // Windows 自愈：document-start 注入丢失、中途被打断、或 Google 水合把顶栏
+  // 按钮冲掉时，延迟补装两次 UI 层。观察器 / 右键监听重复挂载是安全的
+  // （装饰按节点 id 幂等），遮罩在自愈路径里跳过。
+  if (typeof setTimeout === "function") {
+    var healUI = function () {
+      try {
+        if (location.hostname === "tasks.google.com" && uiAvailable() && !document.getElementById("gtasks-theme-btn")) {
+          window.__gtaskUIInstalled = false;
+          installUI(true);
+        }
+      } catch (ignored) {}
+    };
+    setTimeout(healUI, 1500);
+    setTimeout(healUI, 4500);
+  }
 
   // Document-start injection (Windows) announces before WIZ_global_data exists,
   // so re-announce once the page has finished loading. The Go watcher also polls,
