@@ -1000,9 +1000,15 @@
     if (workbenchItem) {
       workbenchItem.setAttribute("aria-label", label);
       workbenchItem.setAttribute("title", label);
-      var text = workbenchItem.querySelector(".aqdrmf-rymPhb-fpDzbe-fmcmS");
+      var text =
+        workbenchItem.querySelector("[data-gtasks-support-label]") ||
+        workbenchItem.querySelector(".aqdrmf-rymPhb-fpDzbe-fmcmS");
       if (text) text.textContent = label;
     }
+    var updateLabel = document.querySelector("[data-gtasks-update] [data-gtasks-support-label]");
+    if (updateLabel) updateLabel.textContent = tt("menu.checkUpdate", "检查更新…");
+    var aboutLabel = document.querySelector("[data-gtasks-about] [data-gtasks-support-label]");
+    if (aboutLabel) aboutLabel.textContent = tt("menu.about", "关于 GTasks");
     var rowMenus = document.querySelectorAll("[data-gtasks-rowmenu]");
     for (var index = 0; index < rowMenus.length; index++) {
       rowMenus[index].title = listOptionsTitle();
@@ -1044,74 +1050,66 @@
   // 把「帮助」这一项原地改造成「GTasks 工作台」再挪到菜单末尾：沿用 Google
   // 自己的 li（类名、内层结构、行高、悬停高亮、键盘导航全都一致）。自己新造
   // 一个 li 会缺 Google 的状态类，高度比别人矮一截、hover 也没反应。
-  function relabelAsWorkbench(item, menu) {
-    // 只摘掉 jsaction 里的 click 段：Google 的事件是按属性委托到根节点分发的，
-    // 留着就会在点「工作台」时顺带打开帮助页；hover / ripple / 键盘那些保留。
-    var jsaction = item.getAttribute("jsaction") || "";
-    if (jsaction) {
-      item.setAttribute("jsaction", jsaction.replace(/(?:^|;)\s*click:[^;]*/g, "").replace(/^;\s*/, ""));
-    }
-    item.removeAttribute("jslog");
-    item.setAttribute("data-gtasks-workbench", "1");
-    var text = workbenchLabel();
-    item.setAttribute("aria-label", text);
-    item.setAttribute("title", text);
-    var label = item.querySelector(".aqdrmf-rymPhb-fpDzbe-fmcmS");
-    if (label) label.textContent = text;
-    else item.textContent = text;
-    item.addEventListener("click", function (event) {
-      event.stopPropagation();
-      event.preventDefault();
-      closeMenu(menu);
-      uiCommand("openWorkbench", {});
-    });
-    menu.appendChild(item);
+  // 自建菜单项：不克隆 Google 的 li。Windows 上 Google 的事件委托切不干净，
+  // 克隆节点点下去会顺带打开帮助页；自建节点零 Google 属性，监听器走捕获阶段
+  // 并 stopImmediatePropagation，点击只归我们。
+  function ownSupportItem(attr, label, onClick) {
+    var li = document.createElement("li");
+    li.setAttribute("role", "menuitem");
+    li.setAttribute("tabindex", "-1");
+    li.setAttribute(attr, "1");
+    li.setAttribute("aria-label", label);
+    li.setAttribute(
+      "style",
+      "display:flex;align-items:center;height:40px;padding:0 16px;list-style:none;" +
+        "font:14px/1 Roboto,'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif;" +
+        "color:inherit;cursor:pointer;white-space:nowrap",
+    );
+    var span = document.createElement("span");
+    span.setAttribute("data-gtasks-support-label", "1");
+    span.textContent = label;
+    li.appendChild(span);
+    li.addEventListener(
+      "click",
+      function (event) {
+        event.stopImmediatePropagation();
+        event.stopPropagation();
+        event.preventDefault();
+        onClick();
+      },
+      true,
+    );
+    return li;
   }
 
   function decorateSupportMenu(menu) {
     if (!menu || menu.querySelector("[data-gtasks-workbench]")) return;
-    var item = findHelpItem(menu);
-    if (!item) {
-      // Google 万一改了菜单结构：克隆最后一项拿到完整的状态类，再改造它。
-      var items = menuItems(menu);
-      if (!items.length) return;
-      item = items[items.length - 1].cloneNode(true);
-      menu.appendChild(item);
+    var help = findHelpItem(menu);
+    if (help) {
+      // 原「帮助」项直接藏掉：桌面客户端里帮助页没有意义，留着还可能被点中
+      // 开出帮助 webview（Windows 上尤其切不断它的事件委托）。
+      try {
+        help.style.display = "none";
+      } catch (ignored) {}
     }
-    relabelAsWorkbench(item, menu);
-    appendSupportItems(menu);
-  }
-
-  // 「检查更新 / 关于」两项克隆工作台那枚改造过的 Google li：cloneNode 不带
-  // JS 监听器，click 自己补，样式 / 行高 / hover 全沿用 Google 的状态类。
-  function appendSupportItems(menu) {
-    if (menu.querySelector("[data-gtasks-about]")) return;
-    var source = menu.querySelector("[data-gtasks-workbench]");
-    if (!source) return;
-    addSupportItem(menu, source, "data-gtasks-update", tt("menu.checkUpdate", "检查更新…"), function () {
-      uiCommand("checkUpdate");
-    });
-    addSupportItem(menu, source, "data-gtasks-about", tt("menu.about", "关于 GTasks"), function () {
-      uiCommand("about");
-    });
-  }
-
-  function addSupportItem(menu, source, attr, label, onClick) {
-    var node = source.cloneNode(true);
-    node.removeAttribute("data-gtasks-workbench");
-    node.setAttribute(attr, "1");
-    node.setAttribute("aria-label", label);
-    node.setAttribute("title", label);
-    var text = node.querySelector(".aqdrmf-rymPhb-fpDzbe-fmcmS");
-    if (text) text.textContent = label;
-    else node.textContent = label;
-    node.addEventListener("click", function (event) {
-      event.stopPropagation();
-      event.preventDefault();
-      closeMenu(menu);
-      onClick();
-    });
-    menu.appendChild(node);
+    menu.appendChild(
+      ownSupportItem("data-gtasks-workbench", workbenchLabel(), function () {
+        closeMenu(menu);
+        uiCommand("openWorkbench", {});
+      }),
+    );
+    menu.appendChild(
+      ownSupportItem("data-gtasks-update", tt("menu.checkUpdate", "检查更新…"), function () {
+        closeMenu(menu);
+        uiCommand("checkUpdate");
+      }),
+    );
+    menu.appendChild(
+      ownSupportItem("data-gtasks-about", tt("menu.about", "关于 GTasks"), function () {
+        closeMenu(menu);
+        uiCommand("about");
+      }),
+    );
   }
 
   // 内容区的「列表选项」按钮和清单标题在同一个 section 里，标题 id 就是
@@ -1521,6 +1519,16 @@
     watchSplash();
   }
 
+  try {
+    document.addEventListener(
+      "keydown",
+      function (event) {
+        if (event.key === "Escape" && document.getElementById(DIALOG_ID)) closeDialog();
+      },
+      true,
+    );
+  } catch (ignored) {}
+
   // ---------------------------------------------------------- 关于 / 升级对话框
   //
   // 升级流程的事件由 Go 侧 internal/update 推过来（window.__gtask.updateEvent），
@@ -1645,6 +1653,17 @@
         });
       })(nodes[index], handlers[index]);
     }
+    // 点遮罩空白处关闭：对话框万一在个别 WebView 上渲染失败，也不至于留下
+    // 一张看不见的全屏遮罩把页面冻住。
+    node.addEventListener("click", function (event) {
+      if (event.target === node) closeDialog();
+    });
+    setTimeout(function () {
+      var card = node.firstElementChild;
+      if (card && card.getBoundingClientRect().height === 0 && node.parentNode) {
+        node.parentNode.removeChild(node);
+      }
+    }, 400);
     return node;
   }
 
