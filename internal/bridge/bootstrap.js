@@ -928,6 +928,37 @@
   }
 
   var headerPlaceTries = 0;
+  // 绝对定位仍被祖先 overflow 裁掉时（Google 前端构建差异、结构查找也没命中）
+  // 退回 position:fixed 挂到 body：视口坐标不受任何祖先裁剪盒影响。
+  var headerFixedMode = false;
+
+  // 「?」外面那层 overflow:hidden 的小裁剪盒（部分构建只有 96px 宽）会把画到
+  // 盒子外面的按钮直接裁没。早先靠 Google 的哈希类名加宽它，类名对不上（Windows
+  // 命中的前端构建不同）就整颗消失；现在按结构找「overflow 隐藏的小盒子」并用
+  // 内联样式加宽，与类名解耦。
+  function widenClipBox(support) {
+    var node = support.parentElement;
+    while (node && node !== document.body && node !== document.documentElement) {
+      if (!node.getAttribute || !node.getAttribute("data-gtasks-clip")) {
+        var overflow = "";
+        try {
+          var computed = window.getComputedStyle(node);
+          overflow = (computed.overflow || "") + " " + (computed.overflowX || "");
+        } catch (ignored) {
+          break;
+        }
+        if (overflow.indexOf("hidden") >= 0 || overflow.indexOf("clip") >= 0) {
+          var box = node.getBoundingClientRect();
+          if (box.width > 0 && box.width < 240 && box.height <= 64) {
+            node.setAttribute("data-gtasks-clip", "1");
+            node.style.setProperty("width", "140px", "important");
+            node.style.setProperty("min-width", "140px", "important");
+          }
+        }
+      }
+      node = node.parentElement;
+    }
+  }
 
   // 两颗按钮摆到「?」左边的空档里（主题 / 语言 / ?）。锚点用「?」的实测位置：
   // 首屏那一瞬 Google 的图标还没排版完，量到的宽度可能是 0，这种时候先不摆，
@@ -945,6 +976,29 @@
       return;
     }
     headerPlaceTries = 0;
+    placeHeaderPair(host, support, themeButton, langButton);
+    // 自检：摆完量一次，被祖先裁剪成 0 就切 fixed 再摆一遍。
+    if (!headerFixedMode) {
+      var themeRect = themeButton.getBoundingClientRect();
+      if (themeRect.width < 8 || themeRect.height < 8) {
+        headerFixedMode = true;
+        placeHeaderPair(host, support, themeButton, langButton);
+      }
+    }
+  }
+
+  function placeHeaderPair(host, support, themeButton, langButton) {
+    var supportRect = support.getBoundingClientRect();
+    if (headerFixedMode) {
+      if (themeButton.parentElement !== document.body) document.body.appendChild(themeButton);
+      if (langButton.parentElement !== document.body) document.body.appendChild(langButton);
+      // fixed 的 right 相对视口：主题贴「?」左侧 48px，语言再往左一格。
+      var fixedRight = Math.round(window.innerWidth - supportRect.left) + 48;
+      placeFixedButton(themeButton, supportRect.top, fixedRight);
+      placeFixedButton(langButton, supportRect.top, fixedRight - 44);
+      return;
+    }
+    var hostRect = host.getBoundingClientRect();
     var top = Math.round(supportRect.top - hostRect.top);
     // 「?」左移后它左边腾出的空档正好放两颗按钮：主题贴「?」左侧 8px（40+4+4），
     // 语言再往左一格。right 相对宿主盒子算。
@@ -953,9 +1007,16 @@
     placeHeaderButton(langButton, top, themeRight - 44);
   }
 
+  function placeFixedButton(button, top, right) {
+    button.style.position = "fixed";
+    button.style.top = Math.round(top) + "px";
+    button.style.right = right + "px";
+  }
+
   function installHeaderButtons() {
     var support = document.querySelector(SUPPORT_BUTTON_SELECTOR);
     if (!support) return;
+    widenClipBox(support);
     var host = themeHost(support);
     if (!host) return;
     host.setAttribute("data-gtasks-theme-host", "1");
@@ -984,9 +1045,41 @@
     var themeButton = document.getElementById("gtasks-theme-btn");
     var langButton = document.getElementById("gtasks-lang-btn");
     if (!support || !themeButton || !langButton) return;
+    widenClipBox(support);
     var host = themeHost(support);
     if (!host) return;
     placeHeaderButtons(host, support, themeButton, langButton);
+  }
+
+  // 兜底巡检：按钮被水合带走就重挂，被裁剪成 0 就重摆（重摆内部会切 fixed）。
+  // 四秒一轮，成本只是几次查询。
+  function headerSafetyCheck() {
+    if (location.hostname !== "tasks.google.com" || !window.__gtaskUIInstalled) return;
+    var themeButton = document.getElementById("gtasks-theme-btn");
+    var langButton = document.getElementById("gtasks-lang-btn");
+    if (!themeButton || !langButton) {
+      try {
+        installHeaderButtons();
+      } catch (ignored) {}
+      return;
+    }
+    var rect = themeButton.getBoundingClientRect();
+    if (rect.width < 8 || rect.height < 8) {
+      try {
+        replaceHeaderButtons();
+      } catch (ignored) {}
+    }
+  }
+
+  var scrollReplaceTimer = 0;
+
+  // fixed 兜底模式下按钮不跟文档流走，滚动时按「?」的新位置重摆。
+  function onHeaderScroll() {
+    if (!headerFixedMode || scrollReplaceTimer) return;
+    scrollReplaceTimer = setTimeout(function () {
+      scrollReplaceTimer = 0;
+      replaceHeaderButtons();
+    }, 80);
   }
 
   // 词表到位（或换了语言）之后，把页面上已经注入的文案统一刷一遍：两颗顶栏
@@ -1047,28 +1140,59 @@
     return null;
   }
 
-  // 把「帮助」这一项原地改造成「GTasks 工作台」再挪到菜单末尾：沿用 Google
-  // 自己的 li（类名、内层结构、行高、悬停高亮、键盘导航全都一致）。自己新造
-  // 一个 li 会缺 Google 的状态类，高度比别人矮一截、hover 也没反应。
-  // 自建菜单项：不克隆 Google 的 li。Windows 上 Google 的事件委托切不干净，
-  // 克隆节点点下去会顺带打开帮助页；自建节点零 Google 属性，监听器走捕获阶段
-  // 并 stopImmediatePropagation，点击只归我们。
-  function ownSupportItem(attr, label, onClick) {
-    var li = document.createElement("li");
+  // 菜单项外壳：克隆 Google 真实条目（类名、内层结构、悬停高亮、键盘导航都来自
+  // Google 自己的 CSS，颜色与过渡和原生条目完全一致），但剥掉 Google 事件委托
+  // 认得的属性（jsaction / id / data-* / 内联 style），点击只落到我们的捕获阶段
+  // 监听器里，不会顺带开出帮助页。菜单里找不到可克隆的条目时退回自建 li。
+  function cloneMenuItemTemplate(menu) {
+    var source = findHelpItem(menu) || menuItems(menu)[0];
+    if (!source || typeof source.cloneNode !== "function") return null;
+    var clone = source.cloneNode(true);
+    var names = [];
+    for (var index = 0; index < clone.attributes.length; index++) names.push(clone.attributes[index].name);
+    for (var nameIndex = 0; nameIndex < names.length; nameIndex++) {
+      if (/^(jsaction|id|data-|style|aria-)/.test(names[nameIndex])) clone.removeAttribute(names[nameIndex]);
+    }
+    return clone;
+  }
+
+  function setMenuItemLabel(node, label) {
+    var leaves = node.querySelectorAll("*");
+    var placed = false;
+    for (var index = 0; index < leaves.length; index++) {
+      var leaf = leaves[index];
+      if (leaf.childElementCount !== 0 || (leaf.textContent || "").trim() === "") continue;
+      leaf.textContent = placed ? "" : label;
+      if (!placed) leaf.setAttribute("data-gtasks-support-label", "1");
+      placed = true;
+    }
+    if (!placed) {
+      node.textContent = label;
+      node.setAttribute("data-gtasks-support-label", "1");
+    }
+  }
+
+  function ownSupportItem(attr, label, onClick, menu) {
+    var li = menu ? cloneMenuItemTemplate(menu) : null;
+    if (li) {
+      setMenuItemLabel(li, label);
+    } else {
+      li = document.createElement("li");
+      li.setAttribute(
+        "style",
+        "display:flex;align-items:center;height:40px;padding:0 16px;list-style:none;" +
+          "font:14px/1 Roboto,'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif;" +
+          "color:inherit;cursor:pointer;white-space:nowrap",
+      );
+      var span = document.createElement("span");
+      span.setAttribute("data-gtasks-support-label", "1");
+      span.textContent = label;
+      li.appendChild(span);
+    }
     li.setAttribute("role", "menuitem");
     li.setAttribute("tabindex", "-1");
     li.setAttribute(attr, "1");
     li.setAttribute("aria-label", label);
-    li.setAttribute(
-      "style",
-      "display:flex;align-items:center;height:40px;padding:0 16px;list-style:none;" +
-        "font:14px/1 Roboto,'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif;" +
-        "color:inherit;cursor:pointer;white-space:nowrap",
-    );
-    var span = document.createElement("span");
-    span.setAttribute("data-gtasks-support-label", "1");
-    span.textContent = label;
-    li.appendChild(span);
     li.addEventListener(
       "click",
       function (event) {
@@ -1093,22 +1217,37 @@
       } catch (ignored) {}
     }
     menu.appendChild(
-      ownSupportItem("data-gtasks-workbench", workbenchLabel(), function () {
-        closeMenu(menu);
-        uiCommand("openWorkbench", {});
-      }),
+      ownSupportItem(
+        "data-gtasks-workbench",
+        workbenchLabel(),
+        function () {
+          closeMenu(menu);
+          uiCommand("openWorkbench", {});
+        },
+        menu,
+      ),
     );
     menu.appendChild(
-      ownSupportItem("data-gtasks-update", tt("menu.checkUpdate", "检查更新…"), function () {
-        closeMenu(menu);
-        uiCommand("checkUpdate");
-      }),
+      ownSupportItem(
+        "data-gtasks-update",
+        tt("menu.checkUpdate", "检查更新…"),
+        function () {
+          closeMenu(menu);
+          uiCommand("checkUpdate");
+        },
+        menu,
+      ),
     );
     menu.appendChild(
-      ownSupportItem("data-gtasks-about", tt("menu.about", "关于 GTasks"), function () {
-        closeMenu(menu);
-        uiCommand("about");
-      }),
+      ownSupportItem(
+        "data-gtasks-about",
+        tt("menu.about", "关于 GTasks"),
+        function () {
+          closeMenu(menu);
+          uiCommand("about");
+        },
+        menu,
+      ),
     );
   }
 
@@ -1378,23 +1517,30 @@
 
   function observeUI() {
     var observer = new MutationObserver(function (records) {
-      var needsHeader = !document.getElementById("gtasks-theme-btn");
-      for (var index = 0; index < records.length; index++) {
-        var added = records[index].addedNodes;
-        for (var nodeIndex = 0; nodeIndex < added.length; nodeIndex++) {
-          var node = added[nodeIndex];
-          if (!node || node.nodeType !== 1) continue;
-          if (!needsHeader && node.matches && node.matches(SUPPORT_MENU_SELECTOR)) {
-            decorateSupportMenu(node);
-          } else if (!needsHeader && node.querySelector) {
-            var menu = node.querySelector(SUPPORT_MENU_SELECTOR);
-            if (menu) decorateSupportMenu(menu);
-          }
-          if (node.matches && node.matches(LIST_ROW_SELECTOR)) decorateRow(node);
-          else if (node.querySelector && node.querySelector(LIST_ROW_SELECTOR)) decorateRows(node);
-        }
+      var needsHeader = !document.getElementById("gtasks-theme-btn") || !document.getElementById("gtasks-lang-btn");
+      // 重挂先做，且单独兜异常：后面记录遍历里任何一步抛错都不能挡住它。
+      if (needsHeader) {
+        try {
+          installHeaderButtons();
+        } catch (ignored) {}
       }
-      if (needsHeader) installHeaderButtons();
+      for (var index = 0; index < records.length; index++) {
+        try {
+          var added = records[index].addedNodes;
+          for (var nodeIndex = 0; nodeIndex < added.length; nodeIndex++) {
+            var node = added[nodeIndex];
+            if (!node || node.nodeType !== 1) continue;
+            if (!needsHeader && node.matches && node.matches(SUPPORT_MENU_SELECTOR)) {
+              decorateSupportMenu(node);
+            } else if (!needsHeader && node.querySelector) {
+              var menu = node.querySelector(SUPPORT_MENU_SELECTOR);
+              if (menu) decorateSupportMenu(menu);
+            }
+            if (node.matches && node.matches(LIST_ROW_SELECTOR)) decorateRow(node);
+            else if (node.querySelector && node.querySelector(LIST_ROW_SELECTOR)) decorateRows(node);
+          }
+        } catch (ignored) {}
+      }
     });
     observer.observe(document.body || document.documentElement, { childList: true, subtree: true });
   }
@@ -1893,7 +2039,9 @@
       scheduleHeaderPlacement();
       try {
         window.addEventListener("resize", replaceHeaderButtons);
+        window.addEventListener("scroll", onHeaderScroll, true);
       } catch (ignored) {}
+      setInterval(headerSafetyCheck, 4000);
       decorateRows(document);
       decorateSupportMenu(document.querySelector(SUPPORT_MENU_SELECTOR));
     };
