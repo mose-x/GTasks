@@ -832,6 +832,10 @@
       '[aria-label*="Google 应用"], [aria-label*="Google apps"], a[href*="/about/products"] { display: none !important; }',
       ".gtasks-hbtn { width: 40px; height: 40px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; color: inherit; }",
       ".gtasks-hbtn:hover, .gtasks-hbtn:focus { background: rgba(128,134,139,.14); outline: none; }",
+      // 「?」菜单里我们克隆出来的三项：Google 的悬停高亮靠 jsaction 委托加类，
+      // 属性剥掉后就不会再亮，这里按主题自带给原生行一致的悬停 / 聚焦底色。
+      "@media (prefers-color-scheme: dark) { [data-gtasks-workbench]:hover, [data-gtasks-workbench]:focus, [data-gtasks-update]:hover, [data-gtasks-update]:focus, [data-gtasks-about]:hover, [data-gtasks-about]:focus { background: rgba(255,255,255,.08); } }",
+      "@media (prefers-color-scheme: light) { [data-gtasks-workbench]:hover, [data-gtasks-workbench]:focus, [data-gtasks-update]:hover, [data-gtasks-update]:focus, [data-gtasks-about]:hover, [data-gtasks-about]:focus { background: rgba(60,64,67,.08); } }",
       // 主题 / 语言两颗按钮绝对定位在「?」右边的空档里。Google 那个行内容器里混着
       // block 级的墨水（ripple）容器，按钮留在行内会被挤到第二行，把顶栏撑高 40px，
       // 连带「支持」菜单也弹到顶栏上面去。
@@ -928,46 +932,30 @@
   }
 
   var headerPlaceTries = 0;
-  // 绝对定位仍被祖先 overflow 裁掉时（Google 前端构建差异、结构查找也没命中）
-  // 退回 position:fixed 挂到 body：视口坐标不受任何祖先裁剪盒影响。
-  var headerFixedMode = false;
+  // 默认 fixed 挂 body：视口坐标不受任何祖先 overflow 裁剪盒影响（Windows 命中
+  // 的 Google 前端构建里裁剪盒类名对不上，绝对定位会被整颗裁没）。祖先带
+  // transform 时 fixed 会退化成相对该祖先，摆完用贴合校验发现并切回绝对定位。
+  var headerFixedMode = true;
 
-  // 「?」外面那层 overflow:hidden 的小裁剪盒（部分构建只有 96px 宽）会把画到
-  // 盒子外面的按钮直接裁没。早先靠 Google 的哈希类名加宽它，类名对不上（Windows
-  // 命中的前端构建不同）就整颗消失；现在按结构找「overflow 隐藏的小盒子」并用
-  // 内联样式加宽，与类名解耦。
-  function widenClipBox(support) {
-    var node = support.parentElement;
-    while (node && node !== document.body && node !== document.documentElement) {
-      if (!node.getAttribute || !node.getAttribute("data-gtasks-clip")) {
-        var overflow = "";
-        try {
-          var computed = window.getComputedStyle(node);
-          overflow = (computed.overflow || "") + " " + (computed.overflowX || "");
-        } catch (ignored) {
-          break;
-        }
-        if (overflow.indexOf("hidden") >= 0 || overflow.indexOf("clip") >= 0) {
-          var box = node.getBoundingClientRect();
-          if (box.width > 0 && box.width < 240 && box.height <= 64) {
-            node.setAttribute("data-gtasks-clip", "1");
-            node.style.setProperty("width", "140px", "important");
-            node.style.setProperty("min-width", "140px", "important");
-          }
-        }
-      }
-      node = node.parentElement;
-    }
+  // 「?」在顶栏右半区。首屏 / 水合过程中它可能还没排版（宽 0）或暂时堆在左边，
+  // 这种测量值不能用：上一版就是拿 left≈0 的快照把按钮钉到了视口左上角。
+  function supportRectSane(rect) {
+    return (
+      rect.width >= 8 &&
+      rect.height >= 8 &&
+      rect.left >= 0 &&
+      rect.left + rect.width <= window.innerWidth + 8 &&
+      rect.left > window.innerWidth / 2
+    );
   }
 
   // 两颗按钮摆到「?」左边的空档里（主题 / 语言 / ?）。锚点用「?」的实测位置：
-  // 首屏那一瞬 Google 的图标还没排版完，量到的宽度可能是 0，这种时候先不摆，
-  // 稍后重试；窗口尺寸变了也重摆一次（顶栏是右对齐的）。
+  // 测量不值信时先不摆，稍后重试；窗口尺寸变了也重摆一次（顶栏是右对齐的）。
   function placeHeaderButtons(host, support, themeButton, langButton) {
     void host.offsetWidth;
     var supportRect = support.getBoundingClientRect();
     var hostRect = host.getBoundingClientRect();
-    if (supportRect.width < 8 || hostRect.width < 8) {
+    if (!supportRectSane(supportRect) || hostRect.width < 8) {
       if (headerPlaceTries++ < 20) {
         setTimeout(function () {
           placeHeaderButtons(host, support, themeButton, langButton);
@@ -977,14 +965,25 @@
     }
     headerPlaceTries = 0;
     placeHeaderPair(host, support, themeButton, langButton);
-    // 自检：摆完量一次，被祖先裁剪成 0 就切 fixed 再摆一遍。
-    if (!headerFixedMode) {
-      var themeRect = themeButton.getBoundingClientRect();
-      if (themeRect.width < 8 || themeRect.height < 8) {
+    // 贴合校验：fixed 模式应当与「?」同排同高、右缘距离符合预期；对不上说明
+    // 祖先有 transform（fixed 失真）切绝对定位；绝对定位被裁成 0 再切回 fixed。
+    var themeRect = themeButton.getBoundingClientRect();
+    if (!headerAligned(themeRect, supportRect)) {
+      headerFixedMode = !headerFixedMode;
+      placeHeaderPair(host, support, themeButton, langButton);
+      var retryRect = themeButton.getBoundingClientRect();
+      if (retryRect.width < 8 || retryRect.height < 8) {
         headerFixedMode = true;
         placeHeaderPair(host, support, themeButton, langButton);
       }
     }
+  }
+
+  function headerAligned(themeRect, supportRect) {
+    if (themeRect.width < 8 || themeRect.height < 8) return false;
+    if (Math.abs(themeRect.top - supportRect.top) > 6) return false;
+    var fixedRight = Math.round(window.innerWidth - supportRect.left) + 48;
+    return Math.abs(window.innerWidth - themeRect.right - fixedRight) <= 6;
   }
 
   function placeHeaderPair(host, support, themeButton, langButton) {
@@ -1016,7 +1015,6 @@
   function installHeaderButtons() {
     var support = document.querySelector(SUPPORT_BUTTON_SELECTOR);
     if (!support) return;
-    widenClipBox(support);
     var host = themeHost(support);
     if (!host) return;
     host.setAttribute("data-gtasks-theme-host", "1");
@@ -1045,7 +1043,6 @@
     var themeButton = document.getElementById("gtasks-theme-btn");
     var langButton = document.getElementById("gtasks-lang-btn");
     if (!support || !themeButton || !langButton) return;
-    widenClipBox(support);
     var host = themeHost(support);
     if (!host) return;
     placeHeaderButtons(host, support, themeButton, langButton);
@@ -1064,7 +1061,13 @@
       return;
     }
     var rect = themeButton.getBoundingClientRect();
-    if (rect.width < 8 || rect.height < 8) {
+    var bad = rect.width < 8 || rect.height < 8;
+    // 水合把顶栏挪位后按钮可能还钉在旧坐标（甚至视口左上角），偏离「?」就重摆。
+    if (!bad) {
+      var supportRect = support.getBoundingClientRect();
+      if (supportRectSane(supportRect)) bad = Math.abs(rect.top - supportRect.top) > 6;
+    }
+    if (bad) {
       try {
         replaceHeaderButtons();
       } catch (ignored) {}
